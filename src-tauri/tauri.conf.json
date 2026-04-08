@@ -1,0 +1,49 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Gamer Pulse",
+  "version": "0.1.2",
+  "identifier": "com.gamerpulse.app",
+  "build": {
+    "beforeDevCommand": "npm run dev",
+    "devUrl": "http://localhost:1420",
+    "beforeBuildCommand": "npm run build",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "Gamer Pulse",
+        "width": 1280,
+        "height": 800,
+        "minWidth": 900,
+        "minHeight": 600,
+        "decorations": false,
+        "transparent": false,
+        "visible": false
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ]
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDdCQURDNDA1MDJGMjc2QjgKUldTNGR2SUNCY1N0ZS9PaEhzRDRWNUNZQkROTkF2dzdKcUQyRVVTdk1ISHpXVUNxRVVpZ1RtUEwK",
+      "endpoints": [
+        "https://github.com/AdemKhemiri/gamer-pulse/releases/latest/download/latest.json"
+      ],
+      "dialog": true
+    }
+  }
+}

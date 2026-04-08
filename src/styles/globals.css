@@ -1,0 +1,98 @@
+@import "tailwindcss";
+
+/* ── Catppuccin Mocha (default) ───────────────────────── */
+:root, [data-theme="catppuccin"] {
+  --gt-base:       #1e1e2e;
+  --gt-surface:    #181825;
+  --gt-overlay:    #313244;
+  --gt-hover:      #45475a;
+  --gt-muted:      #6c7086;
+  --gt-sub:        #a6adc8;
+  --gt-text:       #cdd6f4;
+  --gt-accent:     #cba6f7;
+  --gt-accent-dim: #b48df7;
+  --gt-blue:       #89b4fa;
+  --gt-green:      #a6e3a1;
+  --gt-red:        #f38ba8;
+  --gt-orange:     #fab387;
+  --gt-yellow:     #f9e2af;
+}
+
+/* ── Dracula ──────────────────────────────────────────── */
+[data-theme="dracula"] {
+  --gt-base:       #282a36;
+  --gt-surface:    #21222c;
+  --gt-overlay:    #44475a;
+  --gt-hover:      #565970;
+  --gt-muted:      #6272a4;
+  --gt-sub:        #8b9ec3;
+  --gt-text:       #f8f8f2;
+  --gt-accent:     #ff79c6;
+  --gt-accent-dim: #ff55b0;
+  --gt-blue:       #8be9fd;
+  --gt-green:      #50fa7b;
+  --gt-red:        #ff5555;
+  --gt-orange:     #ffb86c;
+  --gt-yellow:     #f1fa8c;
+}
+
+/* ── Nord ─────────────────────────────────────────────── */
+[data-theme="nord"] {
+  --gt-base:       #2e3440;
+  --gt-surface:    #292f3b;
+  --gt-overlay:    #3b4252;
+  --gt-hover:      #434c5e;
+  --gt-muted:      #616e88;
+  --gt-sub:        #8892a4;
+  --gt-text:       #eceff4;
+  --gt-accent:     #88c0d0;
+  --gt-accent-dim: #69b3c4;
+  --gt-blue:       #81a1c1;
+  --gt-green:      #a3be8c;
+  --gt-red:        #bf616a;
+  --gt-orange:     #d08770;
+  --gt-yellow:     #ebcb8b;
+}
+
+/* Legacy aliases (used by body/scrollbar below) */
+:root {
+  --bg-base:    var(--gt-base);
+  --bg-surface: var(--gt-surface);
+  --bg-overlay: var(--gt-overlay);
+  --text-main:  var(--gt-text);
+  --text-muted: var(--gt-muted);
+  --accent:     var(--gt-accent);
+}
+
+* {
+  box-sizing: border-box;
+  -webkit-app-region: no-drag;
+}
+
+body {
+  margin: 0;
+  background: var(--bg-base);
+  color: var(--text-main);
+  font-family: "Inter", system-ui, -apple-system, sans-serif;
+  overflow: hidden;
+  user-select: none;
+}
+
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: var(--bg-surface);
+}
+::-webkit-scrollbar-thumb {
+  background: var(--bg-overlay);
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--text-muted);
+}
+
+.titlebar-drag {
+  -webkit-app-region: drag;
+}
