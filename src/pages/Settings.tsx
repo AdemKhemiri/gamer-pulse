@@ -61,6 +61,7 @@ export default function Settings() {
   const queryClient = useQueryClient();
   const [confirmReset, setConfirmReset] = useState(false);
   const [checkingUpdate, setCheckingUpdate] = useState(false);
+  const [downloadProgress, setDownloadProgress] = useState<number | null>(null);
   const [saveNameInput, setSaveNameInput] = useState<string | null>(null);
   const [activeSavedTheme, setActiveSavedTheme] = useState<string | null>(null);
   const { data: settings, isLoading } = useQuery({
@@ -218,9 +219,29 @@ export default function Settings() {
               setCheckingUpdate(true);
               try {
                 const update = await check();
-                if (!update) toast.success("You're on the latest version");
+                if (!update) {
+                  toast.success("You're on the latest version");
+                  return;
+                }
+                toast.dismiss("update");
+                let total = 0;
+                let received = 0;
+                await update.downloadAndInstall((event) => {
+                  if (event.event === "Started") {
+                    total = event.data.contentLength ?? 0;
+                    setDownloadProgress(0);
+                  } else if (event.event === "Progress") {
+                    received += event.data.chunkLength;
+                    setDownloadProgress(total > 0 ? Math.round((received / total) * 100) : null);
+                  } else if (event.event === "Finished") {
+                    setDownloadProgress(100);
+                  }
+                });
+                toast.success("Update installed — restarting…", { id: "update" });
+                const { getCurrentWindow } = await import("@tauri-apps/api/window");
+                await getCurrentWindow().close();
               } catch {
-                toast.error("Could not check for updates");
+                toast.error("Update failed", { id: "update" });
               } finally {
                 setCheckingUpdate(false);
               }
@@ -229,9 +250,20 @@ export default function Settings() {
             className="flex items-center gap-2 px-4 py-2 rounded-md bg-[var(--gt-overlay)] text-sm text-[var(--gt-text)] hover:bg-[var(--gt-hover)] disabled:opacity-50 transition-colors"
           >
             <RefreshCw size={14} className={checkingUpdate ? "animate-spin" : ""} />
-            {checkingUpdate ? "Checking…" : "Check for Updates"}
+            {checkingUpdate ? "Updating…" : "Check for Updates"}
           </button>
-          <p className="text-xs text-[var(--gt-muted)] mt-1">Current version: v0.1.4</p>
+          {downloadProgress !== null && (
+            <div className="mt-2">
+              <div className="h-1.5 bg-[var(--gt-overlay)] rounded-full overflow-hidden">
+                <div
+                  className="h-full bg-[var(--gt-accent)] rounded-full transition-all duration-300"
+                  style={{ width: `${downloadProgress}%` }}
+                />
+              </div>
+              <p className="text-xs text-[var(--gt-muted)] mt-1">{downloadProgress < 100 ? `Downloading… ${downloadProgress}%` : "Installing…"}</p>
+            </div>
+          )}
+          <p className="text-xs text-[var(--gt-muted)] mt-1">Current version: v0.1.5</p>
         </div>
 
         <div className="border-t border-[var(--gt-overlay)] pt-3 mt-1">
