@@ -1,6 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState, useEffect } from "react";
-import { Download, Trash2, MonitorPlay, FolderPlus, X, Pipette, FolderOpen } from "lucide-react";
+import { Download, Trash2, MonitorPlay, FolderPlus, X, Pipette, FolderOpen, RefreshCw } from "lucide-react";
+import { check } from "@tauri-apps/plugin-updater";
 import toast from "react-hot-toast";
 import { getSettings, updateSettings, exportData, resetDatabase, openDbFolder, UserSettings } from "../api/client";
 import { useUiStore } from "../store/uiStore";
@@ -59,6 +60,7 @@ export default function Settings() {
   const setSplashVisible = useUiStore((s) => s.setSplashVisible);
   const queryClient = useQueryClient();
   const [confirmReset, setConfirmReset] = useState(false);
+  const [checkingUpdate, setCheckingUpdate] = useState(false);
   const [saveNameInput, setSaveNameInput] = useState<string | null>(null);
   const [activeSavedTheme, setActiveSavedTheme] = useState<string | null>(null);
   const { data: settings, isLoading } = useQuery({
@@ -208,6 +210,28 @@ export default function Settings() {
             Preview Loading Screen
           </button>
           <p className="text-xs text-[var(--gt-muted)] mt-1">Shows the startup splash screen for 2 seconds.</p>
+        </div>
+
+        <div className="border-t border-[var(--gt-overlay)] pt-3 mt-3">
+          <button
+            onClick={async () => {
+              setCheckingUpdate(true);
+              try {
+                const update = await check();
+                if (!update) toast.success("You're on the latest version");
+              } catch {
+                toast.error("Could not check for updates");
+              } finally {
+                setCheckingUpdate(false);
+              }
+            }}
+            disabled={checkingUpdate}
+            className="flex items-center gap-2 px-4 py-2 rounded-md bg-[var(--gt-overlay)] text-sm text-[var(--gt-text)] hover:bg-[var(--gt-hover)] disabled:opacity-50 transition-colors"
+          >
+            <RefreshCw size={14} className={checkingUpdate ? "animate-spin" : ""} />
+            {checkingUpdate ? "Checking…" : "Check for Updates"}
+          </button>
+          <p className="text-xs text-[var(--gt-muted)] mt-1">Current version: v0.1.4</p>
         </div>
 
         <div className="border-t border-[var(--gt-overlay)] pt-3 mt-1">

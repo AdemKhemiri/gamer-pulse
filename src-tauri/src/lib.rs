@@ -143,7 +143,7 @@ fn get_db_path(app: &AppHandle) -> PathBuf {
 /// previous app-identifier directory exists, copy it over so history is preserved.
 /// This handles renames like com.gametracker.app → com.gamerpulse.app.
 fn migrate_legacy_db(new_db_path: &std::path::Path) {
-    const LEGACY_IDENTIFIERS: &[&str] = &["com.gametracker.app", "game-tracker"];
+    const LEGACY_IDENTIFIERS: &[&str] = &["com.gamerpulse.app", "com.gametracker.app", "game-tracker"];
 
     // Skip if the current DB already has real data.
     if new_db_path.exists() {
