@@ -2,6 +2,7 @@ use rusqlite_migration::{Migrations, M};
 
 pub fn get_migrations() -> Migrations<'static> {
     Migrations::new(vec![M::up(
+        // Migration 1 – initial schema (games, sessions, achievements, settings)
         "CREATE TABLE IF NOT EXISTS games (
                 id              TEXT PRIMARY KEY,
                 name            TEXT NOT NULL,
@@ -48,5 +49,17 @@ pub fn get_migrations() -> Migrations<'static> {
                 value       TEXT NOT NULL,
                 updated_at  TEXT NOT NULL
             );",
+    ),
+    M::up(
+        // Migration 2 – per-game playtime goals
+        "CREATE TABLE IF NOT EXISTS game_goals (
+            id          TEXT PRIMARY KEY,
+            game_id     TEXT NOT NULL REFERENCES games(id) ON DELETE CASCADE,
+            period      TEXT NOT NULL CHECK(period IN ('weekly', 'monthly', 'total')),
+            target_secs INTEGER NOT NULL,
+            created_at  TEXT NOT NULL,
+            UNIQUE(game_id, period)
+        );
+        CREATE INDEX IF NOT EXISTS idx_game_goals_game ON game_goals(game_id);",
     )])
 }

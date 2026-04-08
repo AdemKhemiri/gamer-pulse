@@ -34,6 +34,10 @@ pub fn run() {
                 std::fs::create_dir_all(parent)?;
             }
 
+            // One-time migration: if the new DB is empty but an old DB exists under a
+            // previous app identifier, copy it over so playtime history is preserved.
+            migrate_legacy_db(&db_path);
+
             let db = DbPool::open(&db_path).expect("Failed to open database");
 
             // Run migrations
@@ -117,6 +121,10 @@ pub fn run() {
             commands::settings::reset_database,
             commands::settings::search_covers,
             commands::settings::open_db_folder,
+            // Goals
+            commands::goals::get_goals,
+            commands::goals::set_goal,
+            commands::goals::delete_goal,
             // Launcher
             commands::launcher::launch_game,
         ])
@@ -129,6 +137,49 @@ fn get_db_path(app: &AppHandle) -> PathBuf {
         .app_data_dir()
         .expect("app data dir unavailable")
         .join("game-tracker.db")
+}
+
+/// If the current DB is essentially empty (schema only, < 16 KB) and a DB from a
+/// previous app-identifier directory exists, copy it over so history is preserved.
+/// This handles renames like com.gametracker.app → com.gamerpulse.app.
+fn migrate_legacy_db(new_db_path: &std::path::Path) {
+    const LEGACY_IDENTIFIERS: &[&str] = &["com.gametracker.app", "game-tracker"];
+
+    // Skip if the current DB already has real data.
+    if new_db_path.exists() {
+        if let Ok(meta) = std::fs::metadata(new_db_path) {
+            if meta.len() > 16_384 {
+                return;
+            }
+        }
+    }
+
+    // Look for a legacy DB in a sibling app-data folder.
+    let roaming = match new_db_path
+        .parent()           // …/Roaming/com.gamerpulse.app
+        .and_then(|p| p.parent()) // …/Roaming
+    {
+        Some(p) => p,
+        None => return,
+    };
+
+    for old_id in LEGACY_IDENTIFIERS {
+        let old_path = roaming.join(old_id).join("game-tracker.db");
+        if !old_path.exists() {
+            continue;
+        }
+        // Checkpoint the WAL so the .db file is self-contained before copying.
+        if let Ok(conn) = rusqlite::Connection::open(&old_path) {
+            let _ = conn.execute_batch("PRAGMA wal_checkpoint(TRUNCATE);");
+        }
+        if std::fs::copy(&old_path, new_db_path).is_ok() {
+            eprintln!(
+                "[migrate] Copied legacy database from {:?} to {:?}",
+                old_path, new_db_path
+            );
+        }
+        return; // Stop after the first successful migration.
+    }
 }
 
 fn setup_tray(app: &tauri::App) -> Result<tauri::tray::TrayIcon, Box<dyn std::error::Error>> {

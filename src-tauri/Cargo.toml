@@ -1,6 +1,6 @@
 [package]
 name = "game-tracker"
-version = "0.1.2"
+version = "0.1.3"
 description = "Gamer Pulse"
 authors = ["you"]
 edition = "2021"

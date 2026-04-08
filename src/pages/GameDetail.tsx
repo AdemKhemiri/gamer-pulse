@@ -1,7 +1,7 @@
 import { useState, useRef } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, Star, Calendar, EyeOff, Eye, Pencil, Link, Upload, X, Trash2, FolderOpen } from "lucide-react";
+import { ArrowLeft, Star, Calendar, EyeOff, Eye, Pencil, Link, Upload, X, Trash2, FolderOpen, Target, Plus, Check } from "lucide-react";
 import { open as openFileDialog } from "@tauri-apps/plugin-dialog";
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell,
@@ -10,6 +10,7 @@ import toast from "react-hot-toast";
 import {
   getGame, getGameStats, getSessions, getAchievements,
   getHeatmap, setFavorite, updateGame, searchCovers, getSettings, deleteSession, GamePatch,
+  getGoals, setGoal, deleteGoal, GameGoal, GoalPeriod,
 } from "../api/client";
 import {
   formatHours, formatDuration, formatDate, formatRelative, sourceLabel,
@@ -42,6 +43,9 @@ export default function GameDetail() {
   const queryClient = useQueryClient();
   const [notesValue, setNotesValue] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<Tab>("overview");
+  const [showGoalForm, setShowGoalForm] = useState(false);
+  const [goalPeriod, setGoalPeriod] = useState<GoalPeriod>("weekly");
+  const [goalHours, setGoalHours] = useState("");
   const [heatmapYear, setHeatmapYear] = useState(CURRENT_YEAR);
   const [showCoverEditor, setShowCoverEditor] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -80,6 +84,30 @@ export default function GameDetail() {
     queryKey: ["heatmap", heatmapYear, id],
     queryFn: () => getHeatmap(heatmapYear, id!),
     enabled: !!id,
+  });
+
+  const { data: goals } = useQuery({
+    queryKey: ["goals", id],
+    queryFn: () => getGoals(id!),
+    enabled: !!id,
+  });
+
+  const setGoalMutation = useMutation({
+    mutationFn: ({ period, targetSecs }: { period: GoalPeriod; targetSecs: number }) =>
+      setGoal(id!, period, targetSecs),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["goals", id] });
+      setShowGoalForm(false);
+      setGoalHours("");
+      toast.success("Goal saved");
+    },
+    onError: () => toast.error("Failed to save goal"),
+  });
+
+  const deleteGoalMutation = useMutation({
+    mutationFn: (period: GoalPeriod) => deleteGoal(id!, period),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["goals", id] }),
+    onError: () => toast.error("Failed to delete goal"),
   });
 
   const favMutation = useMutation({
@@ -320,6 +348,31 @@ export default function GameDetail() {
                   </div>
                 </div>
               )}
+
+              <GoalsSection
+                goals={goals ?? []}
+                showForm={showGoalForm}
+                goalPeriod={goalPeriod}
+                goalHours={goalHours}
+                onOpenForm={() => {
+                  // Default to first unset period
+                  const setPeriods = new Set((goals ?? []).map((g) => g.period));
+                  const next = (["weekly", "monthly", "total"] as GoalPeriod[]).find((p) => !setPeriods.has(p)) ?? "weekly";
+                  setGoalPeriod(next);
+                  setGoalHours("");
+                  setShowGoalForm(true);
+                }}
+                onCloseForm={() => setShowGoalForm(false)}
+                onPeriodChange={setGoalPeriod}
+                onHoursChange={setGoalHours}
+                onSave={() => {
+                  const h = parseFloat(goalHours);
+                  if (!h || h <= 0) { toast.error("Enter a valid number of hours"); return; }
+                  setGoalMutation.mutate({ period: goalPeriod, targetSecs: Math.round(h * 3600) });
+                }}
+                onDelete={(period) => deleteGoalMutation.mutate(period)}
+                saving={setGoalMutation.isPending}
+              />
 
               <section className="bg-[var(--gt-surface)] rounded-lg border border-[var(--gt-overlay)] p-4">
                 <div className="flex items-center justify-between mb-4">
@@ -765,6 +818,161 @@ function Stat({ label, value }: { label: string; value: string }) {
       <p className="text-[10px] text-[var(--gt-muted)]">{label}</p>
       <p className="text-xs font-medium text-[var(--gt-text)]">{value}</p>
     </div>
+  );
+}
+
+const PERIOD_LABELS: Record<GoalPeriod, string> = {
+  weekly: "This Week",
+  monthly: "This Month",
+  total: "All Time",
+};
+
+function GoalsSection({
+  goals,
+  showForm,
+  goalPeriod,
+  goalHours,
+  onOpenForm,
+  onCloseForm,
+  onPeriodChange,
+  onHoursChange,
+  onSave,
+  onDelete,
+  saving,
+}: {
+  goals: GameGoal[];
+  showForm: boolean;
+  goalPeriod: GoalPeriod;
+  goalHours: string;
+  onOpenForm: () => void;
+  onCloseForm: () => void;
+  onPeriodChange: (p: GoalPeriod) => void;
+  onHoursChange: (h: string) => void;
+  onSave: () => void;
+  onDelete: (p: GoalPeriod) => void;
+  saving: boolean;
+}) {
+  const setPeriods = new Set(goals.map((g) => g.period));
+  const availablePeriods = (["weekly", "monthly", "total"] as GoalPeriod[]).filter(
+    (p) => !setPeriods.has(p) || p === goalPeriod,
+  );
+  const canAddMore = setPeriods.size < 3;
+
+  return (
+    <section className="bg-[var(--gt-surface)] rounded-lg border border-[var(--gt-overlay)] p-4">
+      <div className="flex items-center justify-between mb-3">
+        <h3 className="text-xs font-semibold text-[var(--gt-sub)] uppercase tracking-wider flex items-center gap-2">
+          <Target size={13} /> Playtime Goals
+        </h3>
+        {canAddMore && !showForm && (
+          <button
+            onClick={onOpenForm}
+            className="flex items-center gap-1 text-xs text-[var(--gt-accent)] hover:text-[var(--gt-accent-dim)] transition-colors"
+          >
+            <Plus size={13} /> Add Goal
+          </button>
+        )}
+      </div>
+
+      {goals.length === 0 && !showForm && (
+        <p className="text-xs text-[var(--gt-muted)]">
+          No goals set. Add one to track your progress.
+        </p>
+      )}
+
+      <div className="space-y-3">
+        {goals.map((g) => {
+          const pct = Math.min((g.currentSecs / g.targetSecs) * 100, 100);
+          const done = g.currentSecs >= g.targetSecs;
+          const currentH = (g.currentSecs / 3600).toFixed(1);
+          const targetH = (g.targetSecs / 3600 % 1 === 0)
+            ? String(g.targetSecs / 3600)
+            : (g.targetSecs / 3600).toFixed(1);
+
+          return (
+            <div key={g.period} className="group">
+              <div className="flex items-center justify-between mb-1">
+                <span className="text-xs font-medium text-[var(--gt-text)]">
+                  {PERIOD_LABELS[g.period as GoalPeriod]}
+                </span>
+                <div className="flex items-center gap-2">
+                  <span className={`text-xs font-medium ${done ? "text-[var(--gt-green)]" : "text-[var(--gt-sub)]"}`}>
+                    {done ? "✓ " : ""}{currentH}h / {targetH}h
+                  </span>
+                  <button
+                    onClick={() => onDelete(g.period as GoalPeriod)}
+                    className="opacity-0 group-hover:opacity-100 p-0.5 rounded text-[var(--gt-muted)] hover:text-[var(--gt-red)] transition-all"
+                    title="Remove goal"
+                  >
+                    <X size={12} />
+                  </button>
+                </div>
+              </div>
+              <div className="h-2 bg-[var(--gt-overlay)] rounded-full overflow-hidden">
+                <div
+                  className="h-full rounded-full transition-all duration-500"
+                  style={{
+                    width: `${pct}%`,
+                    background: done ? "var(--gt-green)" : "var(--gt-accent)",
+                  }}
+                />
+              </div>
+              {done && (
+                <p className="text-[10px] text-[var(--gt-green)] mt-0.5">Goal reached!</p>
+              )}
+            </div>
+          );
+        })}
+      </div>
+
+      {showForm && (
+        <div className="mt-3 pt-3 border-t border-[var(--gt-overlay)]">
+          <div className="flex gap-2 items-end">
+            <div className="flex-1 space-y-1">
+              <label className="text-[10px] text-[var(--gt-muted)]">Period</label>
+              <select
+                value={goalPeriod}
+                onChange={(e) => onPeriodChange(e.target.value as GoalPeriod)}
+                className="w-full bg-[var(--gt-overlay)] rounded px-2 py-1.5 text-xs text-[var(--gt-text)] focus:outline-none focus:ring-1 focus:ring-[var(--gt-accent)]"
+              >
+                {availablePeriods.map((p) => (
+                  <option key={p} value={p}>
+                    {PERIOD_LABELS[p]}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="flex-1 space-y-1">
+              <label className="text-[10px] text-[var(--gt-muted)]">Target (hours)</label>
+              <input
+                type="number"
+                min="0.5"
+                step="0.5"
+                value={goalHours}
+                onChange={(e) => onHoursChange(e.target.value)}
+                onKeyDown={(e) => { if (e.key === "Enter") onSave(); if (e.key === "Escape") onCloseForm(); }}
+                placeholder="e.g. 10"
+                autoFocus
+                className="w-full bg-[var(--gt-overlay)] rounded px-2 py-1.5 text-xs text-[var(--gt-text)] placeholder-[var(--gt-muted)] focus:outline-none focus:ring-1 focus:ring-[var(--gt-accent)]"
+              />
+            </div>
+            <button
+              onClick={onSave}
+              disabled={saving}
+              className="flex items-center gap-1 px-3 py-1.5 rounded bg-[var(--gt-accent)] text-[var(--gt-base)] text-xs font-medium hover:bg-[var(--gt-accent-dim)] disabled:opacity-50 transition-colors"
+            >
+              <Check size={12} /> Save
+            </button>
+            <button
+              onClick={onCloseForm}
+              className="px-2 py-1.5 rounded border border-[var(--gt-overlay)] text-[var(--gt-muted)] hover:text-[var(--gt-text)] text-xs transition-colors"
+            >
+              <X size={12} />
+            </button>
+          </div>
+        </div>
+      )}
+    </section>
   );
 }
 

@@ -73,9 +73,14 @@ pub async fn trigger_scan(state: State<'_, AppState>, window: Window) -> Result<
     let mut added = 0usize;
     let mut updated = 0usize;
     let mut seen_source_ids: Vec<(String, String)> = Vec::new(); // (source, source_id)
+    // Track which sources returned at least one game — if a source returns zero
+    // results we treat it as a scanner failure and do NOT mark its games deleted.
+    let mut sources_with_results: std::collections::HashSet<String> =
+        std::collections::HashSet::new();
 
     for game in &detected {
         seen_source_ids.push((game.source.as_str().to_string(), game.source_id.clone()));
+        sources_with_results.insert(game.source.as_str().to_string());
 
         // Check if exists
         let existing: Option<(String, String)> = conn
@@ -148,7 +153,14 @@ pub async fn trigger_scan(state: State<'_, AppState>, window: Window) -> Result<
                 .iter()
                 .any(|(s, sid)| s == &source && sid == &source_id);
 
-            if !still_present && scanned_sources.contains(&source.as_str()) {
+            // Only mark as deleted if the scanner for this source actually returned
+            // some results — a zero-result scan is treated as a scanner failure, not
+            // "all games uninstalled", to avoid wiping the library on e.g. a registry
+            // read error or Steam being mid-update.
+            if !still_present
+                && scanned_sources.contains(&source.as_str())
+                && sources_with_results.contains(&source)
+            {
                 conn.execute(
                     "UPDATE games SET status = 'deleted', deleted_at = ?1 WHERE id = ?2",
                     rusqlite::params![now, id],

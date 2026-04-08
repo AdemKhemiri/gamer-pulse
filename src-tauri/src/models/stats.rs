@@ -73,3 +73,16 @@ pub struct TopGame {
     pub total_secs: i64,
     pub cover_url: Option<String>,
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GameGoal {
+    pub id: String,
+    pub game_id: String,
+    /// "weekly" | "monthly" | "total"
+    pub period: String,
+    pub target_secs: i64,
+    /// Computed at query time for the current period window
+    pub current_secs: i64,
+    pub created_at: String,
+}

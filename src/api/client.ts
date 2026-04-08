@@ -233,6 +233,30 @@ export const openDbFolder = (): Promise<void> =>
 export const searchCovers = (gameName: string, apiKey: string): Promise<string[]> =>
   invoke("search_covers", { gameName, apiKey });
 
+// ─── Goals ───────────────────────────────────────────────────────────────────
+
+export type GoalPeriod = "weekly" | "monthly" | "total";
+
+export interface GameGoal {
+  id: string;
+  gameId: string;
+  /** "weekly" | "monthly" | "total" */
+  period: GoalPeriod;
+  targetSecs: number;
+  /** Computed for the current period window */
+  currentSecs: number;
+  createdAt: string;
+}
+
+export const getGoals = (gameId: string): Promise<GameGoal[]> =>
+  invoke("get_goals", { gameId });
+
+export const setGoal = (gameId: string, period: GoalPeriod, targetSecs: number): Promise<GameGoal[]> =>
+  invoke("set_goal", { gameId, period, targetSecs });
+
+export const deleteGoal = (gameId: string, period: GoalPeriod): Promise<void> =>
+  invoke("delete_goal", { gameId, period });
+
 // ─── Launch ───────────────────────────────────────────────────────────────────
 
 export const launchGame = (game: Game): Promise<void> =>

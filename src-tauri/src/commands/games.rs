@@ -185,8 +185,14 @@ pub async fn update_game(state: State<'_, AppState>, id: String, patch: GamePatc
 
 #[tauri::command]
 pub async fn delete_game(state: State<'_, AppState>, id: String) -> Result<()> {
+    // Soft-delete: mark as deleted rather than removing the row so that sessions
+    // (and their playtime history) are preserved via the ON DELETE CASCADE schema.
     let conn = state.db.conn.lock().unwrap();
-    conn.execute("DELETE FROM games WHERE id = ?1", rusqlite::params![id])?;
+    let now = chrono::Utc::now().to_rfc3339();
+    conn.execute(
+        "UPDATE games SET status = 'deleted', deleted_at = ?1 WHERE id = ?2",
+        rusqlite::params![now, id],
+    )?;
     Ok(())
 }
 

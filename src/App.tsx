@@ -16,6 +16,7 @@ import SpinToPick from "./pages/SpinToPick";
 import { useGameEvents } from "./hooks/useGameEvents";
 import { triggerScan, getSettings } from "./api/client";
 import { useUiStore } from "./store/uiStore";
+import { check } from "@tauri-apps/plugin-updater";
 
 function SplashScreen() {
   return (
@@ -63,7 +64,7 @@ function SplashScreen() {
       </div>
 
       {/* Version */}
-      <p className="absolute bottom-6 text-xs text-[var(--gt-muted)]/50">v0.1.2</p>
+      <p className="absolute bottom-6 text-xs text-[var(--gt-muted)]/50">v0.1.3</p>
     </div>
   );
 }
@@ -96,6 +97,8 @@ export default function App() {
       const win = getCurrentWindow();
       await win.show();
       await win.setFocus();
+      // Check for updates silently — dialog:true in config handles the prompt
+      check().catch(console.error);
     })();
   }, [isSuccess, settings?.scanOnLaunch]);
 

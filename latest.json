@@ -1,0 +1,11 @@
+{
+  "version": "0.1.2",
+  "notes": "Initial release",
+  "pub_date": "2026-04-08T00:00:00Z",
+  "platforms": {
+    "windows-x86_64": {
+      "url": "https://github.com/AdemKhemiri/gamer-pulse/releases/download/v0.1.2/Gamer%20Pulse_0.1.2_x64-setup.exe",
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVTNGR2SUNCY1N0ZTdzajhnUTVDc2cxWjVKQXgyNEVjNjM0MG1KOTc2ZTQ4MDd2dmtwMUg2S1ZZeWkxL1hvem9La01oYityQ21QTjZ1Rmp1Z3lVa0RVNUhXQzZhR0dpdEFrPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzc1NjcxMTkyCWZpbGU6R2FtZXIgUHVsc2VfMC4xLjJfeDY0LXNldHVwLmV4ZQppeFpYelJzRlRTYTdxN3MyYXdhUHhhUE9YcFYzWjJtLzRUd2gvM2l2RkNqUG0xeXJUMjNYZkhFc3FIYlpNMGpiQlRzS0c0ZHZrOThXZS9pcWRqWFVDZz09Cg=="
+    }
+  }
+}
