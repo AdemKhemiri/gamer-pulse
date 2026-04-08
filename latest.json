@@ -1,6 +1,6 @@
 {
-  "version": "0.1.4",
-  "notes": "trying to fix the auto updater :skull:",
+  "version": "0.1.5",
+  "notes": "testing auto patcher",
   "pub_date": "2026-04-08T00:00:00Z",
   "platforms": {
     "windows-x86_64": {
