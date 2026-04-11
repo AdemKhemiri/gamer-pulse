@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { Trash2, CheckSquare, Square, X } from "lucide-react";
-import { getGames, deleteGame } from "../api/client";
+import { getGames, permanentlyDeleteGame } from "../api/client";
 import { formatHours, formatDate, sourceLabel } from "../utils/format";
 import toast from "react-hot-toast";
 
@@ -22,7 +22,7 @@ export default function History() {
   });
 
   const deleteMutation = useMutation({
-    mutationFn: (id: string) => deleteGame(id),
+    mutationFn: (id: string) => permanentlyDeleteGame(id),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["games"] });
       setConfirmId(null);
@@ -31,7 +31,7 @@ export default function History() {
 
   const bulkDeleteMutation = useMutation({
     mutationFn: async (ids: string[]) => {
-      await Promise.all(ids.map((id) => deleteGame(id)));
+      await Promise.all(ids.map((id) => permanentlyDeleteGame(id)));
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["games"] });

@@ -64,7 +64,7 @@ function SplashScreen() {
       </div>
 
       {/* Version */}
-      <p className="absolute bottom-6 text-xs text-[var(--gt-muted)]/50">v0.1.5</p>
+      <p className="absolute bottom-6 text-xs text-[var(--gt-muted)]/50">v0.1.6</p>
     </div>
   );
 }

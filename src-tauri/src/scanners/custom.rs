@@ -1,7 +1,9 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use crate::models::{DetectedGame, GameSource};
+
+use super::utils;
 
 // ── Publisher blocklist (matched against Windows Uninstall registry) ───────────
 const BLOCKED_PUBLISHERS: &[&str] = &[
@@ -71,6 +73,96 @@ const BLOCKED_PUBLISHERS: &[&str] = &[
     "creative technology",
 ];
 
+/// Publishers that are definitely game studios — used for the "registered app but
+/// not blocked" check so we don't accidentally skip games.
+const GAME_PUBLISHERS: &[&str] = &[
+    "valve",
+    "epic games",
+    "gog.com",
+    "cd projekt",
+    "ubisoft",
+    "electronic arts",
+    " ea ",
+    "blizzard",
+    "2k games",
+    "take-two",
+    "bethesda",
+    "activision",
+    "square enix",
+    "bandai namco",
+    "sega",
+    "capcom",
+    "konami",
+    "thq",
+    "devolver",
+    "paradox",
+    "505 games",
+    "focus entertainment",
+    "focus home",
+    "deep silver",
+    "koch media",
+    "team17",
+    "coffee stain",
+    "raw fury",
+    "humble games",
+    "annapurna",
+    "private division",
+    "wired productions",
+    "merge games",
+    "nacon",
+    "kalypso",
+    "bigben",
+    "microids",
+    "maximum games",
+    "dreamworks",
+    "warner bros",
+    "rockstar",
+    "insomniac",
+    "bungie",
+    "obsidian",
+    "double fine",
+    "codemasters",
+    "frontier",
+    "rebellion",
+    "warhorse",
+    "fatshark",
+    "tripwire",
+    "nightdive",
+    "cyan",
+    "klei",
+    "supergiant",
+    "harebrained",
+    "owlcat",
+    "larian",
+    "owlcat",
+    "inxile",
+    "gunfire",
+    "gearbox",
+    "high on life",
+    "interplay",
+    "3d realms",
+    "nightdive",
+    "new world",
+    "taleworlds",
+    "wargaming",
+    "gaijin",
+    "grinding gear",
+    "path of exile",
+    "riot games",
+    "nexon",
+    "ncsoft",
+    "ncwest",
+    "treyarch",
+    "infinity ward",
+    "sledgehammer",
+    "raven software",
+    "id software",
+    "irrational",
+    "crystal dynamics",
+    "naughty dog",
+    "santa monica",
+];
+
 // ── Folder-name blocklist (fast pre-check before registry lookup) ──────────────
 const BLOCKED_FOLDERS: &[&str] = &[
     "microsoft",
@@ -137,6 +229,8 @@ const BLOCKED_FOLDERS: &[&str] = &[
     "battle.net",
     "battlenet",
     "rockstar games launcher",
+    // Riot — block the root launcher folder and the client subfolder
+    "riot games",
     "riot client",
     "riotclientservices",
     "logitech",
@@ -169,14 +263,17 @@ const GAME_ENGINE_DIRS: &[&str] = &[
     "gamedata",
 ];
 
-// Minimum size for the primary exe (5 MB)
-const MIN_EXE_SIZE: u64 = 5 * 1024 * 1024;
+/// Minimum exe size to qualify on size alone (15 MB).
+const MIN_EXE_SIZE_ALONE: u64 = 15 * 1024 * 1024;
+
+/// Minimum exe size when corroborated by game data signals (5 MB).
+const MIN_EXE_SIZE_WITH_SIGNALS: u64 = 5 * 1024 * 1024;
 
 // ── Public API ─────────────────────────────────────────────────────────────────
 
 pub fn scan_custom_paths(paths: &[String]) -> Vec<DetectedGame> {
-    // Build the registry blocklist once for all paths
-    let registry_blocked = build_registry_blocklist();
+    // Build registry maps once for all paths
+    let (registry_blocked, registry_publishers) = build_registry_maps();
 
     let mut games = Vec::new();
     for path in paths {
@@ -188,14 +285,16 @@ pub fn scan_custom_paths(paths: &[String]) -> Vec<DetectedGame> {
             for entry in entries.flatten() {
                 let subdir = entry.path();
                 if subdir.is_dir() {
-                    if let Some(game) = detect_game_in_dir(&subdir, &registry_blocked) {
+                    if let Some(game) =
+                        detect_game_in_dir(&subdir, &registry_blocked, &registry_publishers)
+                    {
                         games.push(game);
                     }
                 }
             }
         }
         // Root folder itself may be a single-game folder
-        if let Some(game) = detect_game_in_dir(&dir, &registry_blocked) {
+        if let Some(game) = detect_game_in_dir(&dir, &registry_blocked, &registry_publishers) {
             let already = games
                 .iter()
                 .any(|g| g.install_path.as_deref() == Some(dir.to_string_lossy().as_ref()));
@@ -207,22 +306,28 @@ pub fn scan_custom_paths(paths: &[String]) -> Vec<DetectedGame> {
     games
 }
 
-// ── Registry blocklist ─────────────────────────────────────────────────────────
+// ── Registry maps ──────────────────────────────────────────────────────────────
 
-/// Read Windows Uninstall registry and collect install paths whose publisher
-/// is in BLOCKED_PUBLISHERS. Normalized to lowercase for easy comparison.
-fn build_registry_blocklist() -> HashSet<String> {
+/// Returns two maps built from the Windows Uninstall registry:
+/// 1. `blocked`: install paths whose publisher is in BLOCKED_PUBLISHERS (lowercase).
+/// 2. `publishers`: install path → publisher string (lowercase), for ALL registered apps.
+fn build_registry_maps() -> (HashSet<String>, HashMap<String, String>) {
     let mut blocked: HashSet<String> = HashSet::new();
+    let mut publishers: HashMap<String, String> = HashMap::new();
 
     #[cfg(windows)]
     {
         use winreg::enums::*;
         use winreg::RegKey;
 
-        let hives: [(winreg::HKEY, &str); 2] = [
+        let hives: &[(winreg::HKEY, &str)] = &[
             (
                 HKEY_LOCAL_MACHINE,
                 r"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall",
+            ),
+            (
+                HKEY_LOCAL_MACHINE,
+                r"SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall",
             ),
             (
                 HKEY_CURRENT_USER,
@@ -230,7 +335,7 @@ fn build_registry_blocklist() -> HashSet<String> {
             ),
         ];
 
-        for (hive, path) in &hives {
+        for (hive, path) in hives {
             let Ok(key) = RegKey::predef(*hive).open_subkey(path) else {
                 continue;
             };
@@ -244,53 +349,27 @@ fn build_registry_blocklist() -> HashSet<String> {
                 if install_loc.is_empty() {
                     continue;
                 }
+
+                let normalized = install_loc
+                    .to_lowercase()
+                    .trim_end_matches('\\')
+                    .to_string();
                 let pub_lower = publisher.to_lowercase();
-                let is_blocked = BLOCKED_PUBLISHERS.iter().any(|b| pub_lower.contains(b));
 
-                if is_blocked {
-                    blocked.insert(
-                        install_loc
-                            .to_lowercase()
-                            .trim_end_matches('\\')
-                            .to_string(),
-                    );
-                }
-            }
-        }
+                // Record all publishers for the non-game-app check
+                publishers
+                    .entry(normalized.clone())
+                    .or_insert_with(|| pub_lower.clone());
 
-        // Also block the 64-bit registry view
-        let hives64: [(winreg::HKEY, &str); 1] = [(
-            HKEY_LOCAL_MACHINE,
-            r"SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall",
-        )];
-        for (hive, path) in &hives64 {
-            let Ok(key) = RegKey::predef(*hive).open_subkey(path) else {
-                continue;
-            };
-            for subkey_name in key.enum_keys().flatten() {
-                let Ok(subkey) = key.open_subkey(&subkey_name) else {
-                    continue;
-                };
-                let publisher: String = subkey.get_value("Publisher").unwrap_or_default();
-                let install_loc: String = subkey.get_value("InstallLocation").unwrap_or_default();
-
-                if install_loc.is_empty() {
-                    continue;
-                }
-                let pub_lower = publisher.to_lowercase();
+                // Mark as blocked if publisher is in the block list
                 if BLOCKED_PUBLISHERS.iter().any(|b| pub_lower.contains(b)) {
-                    blocked.insert(
-                        install_loc
-                            .to_lowercase()
-                            .trim_end_matches('\\')
-                            .to_string(),
-                    );
+                    blocked.insert(normalized);
                 }
             }
         }
     }
 
-    blocked
+    (blocked, publishers)
 }
 
 /// Returns true if this directory's path starts with any registry-blocked install location.
@@ -302,9 +381,37 @@ fn is_registry_blocked(dir: &Path, blocked: &HashSet<String>) -> bool {
         .any(|b| dir_lower == b.as_str() || dir_lower.starts_with(&format!("{}\\", b)))
 }
 
+/// Returns true if the directory is a registered (non-game) application.
+///
+/// Logic: if the directory appears in the Uninstall registry AND its publisher
+/// is not in GAME_PUBLISHERS, treat it as a known non-game app.
+/// If the publisher IS a game publisher or the directory is not registered at all,
+/// allow it through for the normal heuristic checks.
+fn is_registered_non_game(dir: &Path, publishers: &HashMap<String, String>) -> bool {
+    let dir_lower = dir.to_string_lossy().to_lowercase();
+    let dir_lower = dir_lower.trim_end_matches('\\');
+
+    let publisher = publishers
+        .iter()
+        .find(|(path, _)| dir_lower == path.as_str() || dir_lower.starts_with(&format!("{}\\", path)))
+        .map(|(_, pub_)| pub_.as_str());
+
+    match publisher {
+        None => false, // not in registry at all — allow heuristic check
+        Some(pub_) => {
+            // Registered: only skip if publisher is NOT a game publisher
+            !GAME_PUBLISHERS.iter().any(|g| pub_.contains(g))
+        }
+    }
+}
+
 // ── Detection logic ────────────────────────────────────────────────────────────
 
-fn detect_game_in_dir(dir: &Path, registry_blocked: &HashSet<String>) -> Option<DetectedGame> {
+fn detect_game_in_dir(
+    dir: &Path,
+    registry_blocked: &HashSet<String>,
+    registry_publishers: &HashMap<String, String>,
+) -> Option<DetectedGame> {
     let folder_name = dir
         .file_name()
         .map(|n| n.to_string_lossy().into_owned())
@@ -320,24 +427,36 @@ fn detect_game_in_dir(dir: &Path, registry_blocked: &HashSet<String>) -> Option<
         return None;
     }
 
-    // 3. Collect exe candidates
-    let candidates = collect_exe_candidates(dir, 0);
+    // 3. Registered non-game app check — if the folder is in the Windows
+    //    Uninstall registry with a non-game publisher, skip it.
+    if is_registered_non_game(dir, registry_publishers) {
+        return None;
+    }
+
+    // 4. Collect exe candidates
+    let candidates = utils::collect_exe_candidates(dir, 0, 4);
     if candidates.is_empty() {
         return None;
     }
 
     let (largest_size, exe_path) = candidates.into_iter().max_by_key(|(size, _)| *size)?;
 
-    // 4. Size or game-data signal required
+    // 5. Tightened size/signal heuristic:
+    //    - exe >= 15 MB alone qualifies (very likely a game)
+    //    - exe >= 5 MB AND game engine/data signals qualifies
+    //    - anything smaller is rejected
     let has_game_signals = has_game_data_files(dir) || has_game_engine_dirs(dir);
-    if largest_size < MIN_EXE_SIZE && !has_game_signals {
+    let qualifies = largest_size >= MIN_EXE_SIZE_ALONE
+        || (largest_size >= MIN_EXE_SIZE_WITH_SIGNALS && has_game_signals);
+
+    if !qualifies {
         return None;
     }
 
     let source_id = format!("custom:{}", dir.to_string_lossy().to_lowercase());
 
     Some(DetectedGame {
-        source: GameSource::Manual,
+        source: GameSource::Custom,
         source_id,
         name: folder_name,
         install_path: Some(dir.to_string_lossy().into_owned()),
@@ -394,50 +513,4 @@ fn has_game_engine_dirs(dir: &Path) -> bool {
         }
     }
     false
-}
-
-fn is_helper_exe(name: &str) -> bool {
-    let lower = name.to_lowercase();
-    [
-        "crash",
-        "report",
-        "helper",
-        "uninstall",
-        "setup",
-        "install",
-        "redist",
-        "vcredist",
-        "dotnet",
-        "directx",
-        "dxsetup",
-        "oalinst",
-        "vc_redist",
-        "launcher_stub",
-    ]
-    .iter()
-    .any(|s| lower.contains(s))
-}
-
-fn collect_exe_candidates(dir: &Path, depth: u8) -> Vec<(u64, PathBuf)> {
-    if depth > 4 {
-        return vec![];
-    }
-    let mut candidates = Vec::new();
-    let Ok(entries) = std::fs::read_dir(dir) else {
-        return candidates;
-    };
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if path.is_dir() {
-            candidates.extend(collect_exe_candidates(&path, depth + 1));
-        } else if path.extension().and_then(|e| e.to_str()) == Some("exe") {
-            let name = path.file_name().unwrap_or_default().to_string_lossy();
-            if !is_helper_exe(&name) {
-                if let Ok(meta) = path.metadata() {
-                    candidates.push((meta.len(), path));
-                }
-            }
-        }
-    }
-    candidates
 }

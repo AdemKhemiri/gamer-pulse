@@ -98,6 +98,7 @@ pub fn run() {
             commands::games::add_manual_game,
             commands::games::update_game,
             commands::games::delete_game,
+            commands::games::permanently_delete_game,
             commands::games::set_favorite,
             // Sessions
             commands::sessions::get_sessions,

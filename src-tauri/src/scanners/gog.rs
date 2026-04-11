@@ -1,6 +1,8 @@
+use std::collections::HashSet;
+
 use crate::models::{DetectedGame, GameSource};
 
-use super::Scanner;
+use super::{Scanner, ScanConfig};
 
 pub struct GogScanner;
 
@@ -9,7 +11,7 @@ impl Scanner for GogScanner {
         "GOG Galaxy"
     }
 
-    fn scan(&self) -> Vec<DetectedGame> {
+    fn scan(&self, _config: &ScanConfig) -> Vec<DetectedGame> {
         match scan_gog() {
             Ok(games) => games,
             Err(e) => {
@@ -29,27 +31,28 @@ fn scan_gog() -> anyhow::Result<Vec<DetectedGame>> {
         use winreg::enums::*;
         use winreg::RegKey;
 
-        let mut games = Vec::new();
+        let mut games: Vec<DetectedGame> = Vec::new();
+        // Track seen source IDs to deduplicate across registry hives
+        let mut seen_ids: HashSet<String> = HashSet::new();
 
-        // Try both 32-bit and 64-bit registry paths
         let paths = [
-            ("HKLM", "SOFTWARE\\WOW6432Node\\GOG.com\\Games"),
-            ("HKLM", "SOFTWARE\\GOG.com\\Games"),
-            ("HKCU", "SOFTWARE\\GOG.com\\Games"),
+            (HKEY_LOCAL_MACHINE, "SOFTWARE\\WOW6432Node\\GOG.com\\Games"),
+            (HKEY_LOCAL_MACHINE, "SOFTWARE\\GOG.com\\Games"),
+            (HKEY_CURRENT_USER, "SOFTWARE\\GOG.com\\Games"),
         ];
 
         for (hive, path) in &paths {
-            let root = if *hive == "HKLM" {
-                RegKey::predef(HKEY_LOCAL_MACHINE)
-            } else {
-                RegKey::predef(HKEY_CURRENT_USER)
-            };
-
+            let root = RegKey::predef(*hive);
             let Ok(games_key) = root.open_subkey(path) else {
                 continue;
             };
 
             for subkey_name in games_key.enum_keys().flatten() {
+                // Skip if already seen from another hive
+                if seen_ids.contains(&subkey_name) {
+                    continue;
+                }
+
                 let Ok(game_key) = games_key.open_subkey(&subkey_name) else {
                     continue;
                 };
@@ -65,7 +68,7 @@ fn scan_gog() -> anyhow::Result<Vec<DetectedGame>> {
                 let exe_path = if !exe.is_empty() {
                     Some(exe)
                 } else if !path_val.is_empty() {
-                    // Try to find exe in the path
+                    // Try to find the first exe in the install directory
                     let p = std::path::PathBuf::from(&path_val);
                     p.read_dir().ok().and_then(|mut d| {
                         d.find_map(|e| {
@@ -82,6 +85,7 @@ fn scan_gog() -> anyhow::Result<Vec<DetectedGame>> {
                     None
                 };
 
+                seen_ids.insert(subkey_name.clone());
                 games.push(DetectedGame {
                     source: GameSource::Gog,
                     source_id: subkey_name,

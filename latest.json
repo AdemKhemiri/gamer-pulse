@@ -1,11 +1,11 @@
 {
-  "version": "0.1.5",
-  "notes": "testing auto patcher",
+  "version": "0.1.6",
+  "notes": "Fixing the game scanner",
   "pub_date": "2026-04-08T00:00:00Z",
   "platforms": {
     "windows-x86_64": {
-      "url": "https://github.com/AdemKhemiri/gamer-pulse/releases/download/v0.1.5/Gamer.Pulse_0.1.5_x64-setup.exe",
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVTNGR2SUNCY1N0ZTlQcVFiMjA5dEtUV1RnaTVUNFR2K3ZKdjBPRkdiVDZCdVZRUkVnUHczZEMyaEZuam9kajV0TDJGM2syREdrakp4dDhXTjI0anU5dzQ1WEVBODRydXdzPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzc1Njg0OTA0CWZpbGU6R2FtZXIgUHVsc2VfMC4xLjVfeDY0LXNldHVwLmV4ZQoxdllFMXdkbjJQcmFzY25oTVA1L3cxQzJKeGpMMEVVdjh0YWFuekVJVWZVdGwyYk9YZDJYWTNiY0JEMldlN1ZGRFFJVmY5clhFVFlyQkVVRTJ3L0NBZz09Cg=="
+      "url": "https://github.com/AdemKhemiri/gamer-pulse/releases/download/v0.1.6/Gamer.Pulse_0.1.6_x64-setup.exe",
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVTNGR2SUNCY1N0ZXcxRWVUOXRKVDd5VVFUMm9TRHFOVlNrTU4wMU9FUzZQUWVRSXhWaWF0ajJiVUwyaHZKSHNyRE41Q256d21pQWR1dVJUTHBaRlRNY2ZWdTVqbDVNeGd3PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzc1ODk1MTE0CWZpbGU6R2FtZXIgUHVsc2VfMC4xLjZfeDY0LXNldHVwLmV4ZQphQlVIaEwyVlgvOGhUTVF4Y3JObTFCTVRCSjdhQzc5Slk4dFNBVEJxZUlYT21DV2FYWFRHTGhoclloSm5rTFAvRHFTQS84WXBMMmJDQmNHSlBHNHhDZz09Cg=="
     }
   }
 }

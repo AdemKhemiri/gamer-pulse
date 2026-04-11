@@ -8,7 +8,11 @@ pub enum GameSource {
     Gog,
     Xbox,
     Riot,
-    Manual,
+    Ubisoft,
+    Ea,
+    Battlenet,
+    Custom,  // games found via custom path scanning
+    Manual,  // games added manually by the user via the UI
 }
 
 impl GameSource {
@@ -19,6 +23,10 @@ impl GameSource {
             GameSource::Gog => "gog",
             GameSource::Xbox => "xbox",
             GameSource::Riot => "riot",
+            GameSource::Ubisoft => "ubisoft",
+            GameSource::Ea => "ea",
+            GameSource::Battlenet => "battlenet",
+            GameSource::Custom => "custom",
             GameSource::Manual => "manual",
         }
     }
@@ -39,6 +47,10 @@ impl std::str::FromStr for GameSource {
             "gog" => Ok(GameSource::Gog),
             "xbox" => Ok(GameSource::Xbox),
             "riot" => Ok(GameSource::Riot),
+            "ubisoft" => Ok(GameSource::Ubisoft),
+            "ea" => Ok(GameSource::Ea),
+            "battlenet" => Ok(GameSource::Battlenet),
+            "custom" => Ok(GameSource::Custom),
             "manual" => Ok(GameSource::Manual),
             _ => Err(format!("Unknown source: {}", s)),
         }

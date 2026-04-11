@@ -197,6 +197,20 @@ pub async fn delete_game(state: State<'_, AppState>, id: String) -> Result<()> {
 }
 
 #[tauri::command]
+pub async fn permanently_delete_game(state: State<'_, AppState>, id: String) -> Result<()> {
+    // Hard-delete: wipe sessions, then mark the game row as 'blocked' so the
+    // scanner never re-adds it. The row itself stays so its source_id remains
+    // reserved and the game cannot resurface after the next scan.
+    let conn = state.db.conn.lock().unwrap();
+    conn.execute("DELETE FROM sessions WHERE game_id = ?1", rusqlite::params![id])?;
+    conn.execute(
+        "UPDATE games SET status = 'blocked' WHERE id = ?1",
+        rusqlite::params![id],
+    )?;
+    Ok(())
+}
+
+#[tauri::command]
 pub async fn set_favorite(state: State<'_, AppState>, id: String, favorite: bool) -> Result<()> {
     let conn = state.db.conn.lock().unwrap();
     conn.execute(

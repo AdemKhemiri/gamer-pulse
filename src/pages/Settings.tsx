@@ -157,14 +157,6 @@ export default function Settings() {
         </div>
       </Section>
 
-      {/* Launchers */}
-      <Section title="Launchers">
-        <Toggle label="Steam" checked={form.enableSteam} onChange={(v) => update("enableSteam", v)} />
-        <Toggle label="Epic Games" checked={form.enableEpic} onChange={(v) => update("enableEpic", v)} />
-        <Toggle label="GOG Galaxy" checked={form.enableGog} onChange={(v) => update("enableGog", v)} />
-        <Toggle label="Xbox / Game Pass" checked={form.enableXbox} onChange={(v) => update("enableXbox", v)} />
-      </Section>
-
       {/* App behavior */}
       <Section title="App Behavior">
         <Toggle
@@ -263,7 +255,7 @@ export default function Settings() {
               <p className="text-xs text-[var(--gt-muted)] mt-1">{downloadProgress < 100 ? `Downloading… ${downloadProgress}%` : "Installing…"}</p>
             </div>
           )}
-          <p className="text-xs text-[var(--gt-muted)] mt-1">Current version: v0.1.5</p>
+          <p className="text-xs text-[var(--gt-muted)] mt-1">Current version: v0.1.6</p>
         </div>
 
         <div className="border-t border-[var(--gt-overlay)] pt-3 mt-1">

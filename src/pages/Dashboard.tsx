@@ -62,7 +62,7 @@ export default function Dashboard() {
           icon={<Star size={18} className="text-[var(--gt-yellow)]" />}
           label="Most Played"
           value={stats?.mostPlayedGameName ?? "—"}
-          sub={stats?.totalPlaySecs && stats?.mostPlayedGameName ? formatHours(stats.totalPlaySecs) : "no data yet"}
+          sub={stats?.mostPlayedGameId ? formatHours(stats.totalPlaySecs) : "no data yet"}
           color="yellow"
         />
         <StatCard
@@ -217,7 +217,7 @@ function StatCard({
       className={`bg-[var(--gt-surface)] rounded-lg border p-4 ${borders[color] ?? "border-[var(--gt-overlay)]"}`}
     >
       <div className="flex items-center gap-2 mb-2">{icon}<span className="text-xs text-[var(--gt-sub)]">{label}</span></div>
-      <p className="text-2xl font-bold text-[var(--gt-text)] truncate">{value}</p>
+      <p className="text-lg font-bold text-[var(--gt-text)] leading-tight break-words line-clamp-2">{value}</p>
       <p className="text-xs text-[var(--gt-muted)] mt-0.5">{sub}</p>
     </div>
   );

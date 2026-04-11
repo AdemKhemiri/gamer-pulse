@@ -5,15 +5,16 @@ use tauri::State;
 use crate::error::{AppError, Result};
 use crate::state::AppState;
 
+fn default_true() -> bool {
+    true
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UserSettings {
+    #[serde(default = "default_true")]
     pub scan_on_launch: bool,
     pub scan_interval_hours: u32,
-    pub enable_steam: bool,
-    pub enable_epic: bool,
-    pub enable_gog: bool,
-    pub enable_xbox: bool,
     pub minimize_to_tray: bool,
     pub theme: String,
     #[serde(default)]
@@ -31,10 +32,6 @@ impl Default for UserSettings {
         UserSettings {
             scan_on_launch: true,
             scan_interval_hours: 24,
-            enable_steam: true,
-            enable_epic: true,
-            enable_gog: true,
-            enable_xbox: true,
             minimize_to_tray: true,
             theme: "catppuccin".to_string(),
             steamgriddb_api_key: env!("SGDB_API_KEY").to_string(),

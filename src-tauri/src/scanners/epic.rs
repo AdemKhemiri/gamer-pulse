@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use crate::models::{DetectedGame, GameSource};
 
-use super::Scanner;
+use super::{Scanner, ScanConfig};
 
 pub struct EpicScanner;
 
@@ -11,7 +11,7 @@ impl Scanner for EpicScanner {
         "Epic Games"
     }
 
-    fn scan(&self) -> Vec<DetectedGame> {
+    fn scan(&self, _config: &ScanConfig) -> Vec<DetectedGame> {
         match scan_epic() {
             Ok(games) => games,
             Err(e) => {

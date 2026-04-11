@@ -1,7 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 
 export type GameSource = "steam" | "epic" | "gog" | "xbox" | "riot" | "manual";
-export type GameStatus = "installed" | "deleted" | "hidden";
+export type GameStatus = "installed" | "deleted" | "hidden" | "blocked";
 
 export interface Game {
   id: string;
@@ -113,10 +113,6 @@ export interface GameFilter {
 export interface UserSettings {
   scanOnLaunch: boolean;
   scanIntervalHours: number;
-  enableSteam: boolean;
-  enableEpic: boolean;
-  enableGog: boolean;
-  enableXbox: boolean;
   minimizeToTray: boolean;
   theme: string;
   steamgriddbApiKey: string;
@@ -159,6 +155,9 @@ export const updateGame = (id: string, patch: GamePatch): Promise<Game> =>
 
 export const deleteGame = (id: string): Promise<void> =>
   invoke("delete_game", { id });
+
+export const permanentlyDeleteGame = (id: string): Promise<void> =>
+  invoke("permanently_delete_game", { id });
 
 export const setFavorite = (id: string, favorite: boolean): Promise<void> =>
   invoke("set_favorite", { id, favorite });

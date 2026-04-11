@@ -1,6 +1,6 @@
 use crate::models::{DetectedGame, GameSource};
 
-use super::Scanner;
+use super::{Scanner, ScanConfig};
 
 pub struct XboxScanner;
 
@@ -9,7 +9,7 @@ impl Scanner for XboxScanner {
         "Xbox / Game Pass"
     }
 
-    fn scan(&self) -> Vec<DetectedGame> {
+    fn scan(&self, _config: &ScanConfig) -> Vec<DetectedGame> {
         match scan_xbox() {
             Ok(games) => games,
             Err(e) => {

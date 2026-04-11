@@ -2,7 +2,7 @@ use std::path::{Path, PathBuf};
 
 use crate::models::{DetectedGame, GameSource};
 
-use super::Scanner;
+use super::{utils, Scanner, ScanConfig};
 
 pub struct SteamScanner;
 
@@ -11,7 +11,7 @@ impl Scanner for SteamScanner {
         "Steam"
     }
 
-    fn scan(&self) -> Vec<DetectedGame> {
+    fn scan(&self, _config: &ScanConfig) -> Vec<DetectedGame> {
         match scan_steam() {
             Ok(games) => games,
             Err(e) => {
@@ -67,24 +67,51 @@ fn scan_steam() -> anyhow::Result<Vec<DetectedGame>> {
     }
 }
 
+/// Parse `libraryfolders.vdf` to find all Steam library root paths.
+///
+/// Handles both VDF format variants:
+/// - New format: nested objects with `"path"` key
+///   `"path"  "D:\\SteamLibrary"`
+/// - Old format: direct numeric key → path value
+///   `"1"  "D:\\SteamLibrary"`
 fn parse_library_folders(vdf_path: &Path, steam_root: &Path) -> Vec<PathBuf> {
     let mut paths = vec![steam_root.to_path_buf()];
+    let mut seen = std::collections::HashSet::new();
+    seen.insert(steam_root.to_path_buf());
 
     let content = match std::fs::read_to_string(vdf_path) {
         Ok(c) => c,
         Err(_) => return paths,
     };
 
-    // Simple line-by-line VDF parser for the "path" key
     for line in content.lines() {
         let line = line.trim();
+
+        // New format: line contains the "path" key
+        // e.g.   "path"		"D:\\SteamLibrary"
         if line.contains("\"path\"") {
-            // Extract quoted value after "path"
-            let parts: Vec<&str> = line.splitn(3, '"').collect();
-            if parts.len() >= 4 {
-                let val = line.split('"').nth(3).unwrap_or("").replace("\\\\", "\\");
-                let p = PathBuf::from(&val);
-                if p.exists() && p != steam_root {
+            if let Some(val) = extract_vdf_quoted_value(line, "path") {
+                let p = PathBuf::from(val);
+                if p.exists() && !seen.contains(&p) {
+                    seen.insert(p.clone());
+                    paths.push(p);
+                }
+            }
+            continue;
+        }
+
+        // Old format: line is `"<number>"  "<path>"` where the key is a digit
+        // e.g.   "1"		"D:\\SteamLibrary"
+        let parts: Vec<&str> = line.split('"').collect();
+        // parts layout for `"1"  "D:\\SteamLibrary"`:
+        // ["", "1", "  ", "D:\\SteamLibrary", ""]
+        if parts.len() >= 5 {
+            let key = parts[1];
+            let value = parts[3].replace("\\\\", "\\");
+            if key.chars().all(|c| c.is_ascii_digit()) && !value.is_empty() {
+                let p = PathBuf::from(&value);
+                if p.exists() && !seen.contains(&p) {
+                    seen.insert(p.clone());
                     paths.push(p);
                 }
             }
@@ -93,15 +120,33 @@ fn parse_library_folders(vdf_path: &Path, steam_root: &Path) -> Vec<PathBuf> {
     paths
 }
 
+/// Extract the quoted value after a given key on the same VDF line.
+/// For a line like `\t"path"\t\t"D:\\SteamLibrary"` returns `Some("D:\\SteamLibrary")`.
+fn extract_vdf_quoted_value<'a>(line: &'a str, _key: &str) -> Option<&'a str> {
+    // The value is the second quoted token on the line.
+    // Split by `"` — for `"path"   "D:\\SteamLibrary"` we get:
+    // ["", "path", "   ", "D:\\SteamLibrary", ""]
+    let mut parts = line.split('"');
+    parts.next(); // empty before first quote
+    parts.next(); // key token
+    parts.next(); // whitespace between key and value
+    let value = parts.next()?;
+    if value.is_empty() {
+        None
+    } else {
+        Some(value)
+    }
+}
+
 fn parse_acf(acf_path: &Path, steamapps_dir: &Path) -> Option<DetectedGame> {
     let content = std::fs::read_to_string(acf_path).ok()?;
 
-    let app_id = extract_vdf_value(&content, "appid")?;
-    let name = extract_vdf_value(&content, "name")?;
-    let install_dir = extract_vdf_value(&content, "installdir")?;
+    let app_id = extract_acf_value(&content, "appid")?;
+    let name = extract_acf_value(&content, "name")?;
+    let install_dir = extract_acf_value(&content, "installdir")?;
 
     let install_path = steamapps_dir.join("common").join(&install_dir);
-    let exe_path = find_primary_exe(&install_path);
+    let exe_path = utils::find_largest_exe(&install_path, 4);
 
     let cover_url = format!(
         "https://cdn.akamai.steamstatic.com/steam/apps/{}/library_600x900.jpg",
@@ -118,74 +163,17 @@ fn parse_acf(acf_path: &Path, steamapps_dir: &Path) -> Option<DetectedGame> {
     })
 }
 
-fn extract_vdf_value(content: &str, key: &str) -> Option<String> {
+fn extract_acf_value(content: &str, key: &str) -> Option<String> {
     for line in content.lines() {
         let line = line.trim();
         if line.starts_with(&format!("\"{}\"", key)) {
             // Line format: "key"  "value"
-            let parts: Vec<&str> = line.splitn(5, '"').collect();
-            // parts[0]="" parts[1]=key parts[2]=whitespace parts[3]=value parts[4]=""
+            // Split by `"` → ["", key, whitespace, value, ""]
+            let parts: Vec<&str> = line.split('"').collect();
             if parts.len() >= 4 {
                 return Some(parts[3].to_string());
             }
         }
     }
     None
-}
-
-/// Patterns in exe names that indicate non-game helper processes to skip.
-fn is_helper_exe(name: &str) -> bool {
-    let lower = name.to_lowercase();
-    let skip = [
-        "crash",
-        "report",
-        "helper",
-        "launcher_stub",
-        "uninstall",
-        "setup",
-        "install",
-        "redist",
-        "vcredist",
-        "dotnet",
-        "directx",
-        "dxsetup",
-        "vc_redist",
-        "oalinst",
-    ];
-    skip.iter().any(|s| lower.contains(s))
-}
-
-fn find_primary_exe(install_dir: &Path) -> Option<String> {
-    if !install_dir.exists() {
-        return None;
-    }
-    collect_exe_candidates(install_dir, 0)
-        .into_iter()
-        .max_by_key(|(size, _)| *size)
-        .map(|(_, p)| p.to_string_lossy().into_owned())
-}
-
-/// Recursively collect (size, path) for candidate game exes up to depth 4.
-fn collect_exe_candidates(dir: &Path, depth: u8) -> Vec<(u64, PathBuf)> {
-    if depth > 4 {
-        return vec![];
-    }
-    let mut candidates = Vec::new();
-    let Ok(entries) = std::fs::read_dir(dir) else {
-        return candidates;
-    };
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if path.is_dir() {
-            candidates.extend(collect_exe_candidates(&path, depth + 1));
-        } else if path.extension().and_then(|e| e.to_str()) == Some("exe") {
-            let name = path.file_name().unwrap_or_default().to_string_lossy();
-            if !is_helper_exe(&name) {
-                if let Ok(meta) = std::fs::metadata(&path) {
-                    candidates.push((meta.len(), path));
-                }
-            }
-        }
-    }
-    candidates
 }

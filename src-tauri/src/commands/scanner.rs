@@ -1,10 +1,11 @@
 use chrono::Utc;
 use serde::Serialize;
-use tauri::{Emitter, State, Window};
+use tauri::State;
 use uuid::Uuid;
 
-use crate::error::Result;
-use crate::scanners::run_all_scanners;
+use crate::commands::settings::UserSettings;
+use crate::error::{AppError, Result};
+use crate::scanners::{run_all_scanners, ScanConfig};
 use crate::state::AppState;
 
 #[derive(Serialize, Clone)]
@@ -16,25 +17,10 @@ pub struct ScanResult {
     pub total: usize,
 }
 
-#[derive(Serialize, Clone)]
-#[serde(rename_all = "camelCase")]
-struct ScanProgress {
-    stage: String,
-    count: usize,
-}
-
 #[tauri::command]
-pub async fn trigger_scan(state: State<'_, AppState>, window: Window) -> Result<ScanResult> {
-    let _ = window.emit(
-        "scan:progress",
-        ScanProgress {
-            stage: "scanning".to_string(),
-            count: 0,
-        },
-    );
-
-    // Load custom scan paths from settings
-    let custom_paths: Vec<String> = {
+pub async fn trigger_scan(state: State<'_, AppState>) -> Result<ScanResult> {
+    // Load settings
+    let settings: UserSettings = {
         let conn = state.db.conn.lock().unwrap();
         let json: Option<String> = conn
             .query_row(
@@ -44,28 +30,19 @@ pub async fn trigger_scan(state: State<'_, AppState>, window: Window) -> Result<
             )
             .ok();
         drop(conn);
-        if let Some(j) = json {
-            let settings: crate::commands::settings::UserSettings =
-                serde_json::from_str(&j).unwrap_or_default();
-            settings.custom_scan_paths
-        } else {
-            vec![]
-        }
+        json.and_then(|j| serde_json::from_str(&j).ok())
+            .unwrap_or_default()
     };
 
-    let mut detected = run_all_scanners();
-    if !custom_paths.is_empty() {
-        detected.extend(crate::scanners::custom::scan_custom_paths(&custom_paths));
-    }
-    let total = detected.len();
+    let config = ScanConfig::from_settings(&settings);
 
-    let _ = window.emit(
-        "scan:progress",
-        ScanProgress {
-            stage: "syncing".to_string(),
-            count: total,
-        },
-    );
+    // Run all enabled scanners (blocking I/O) on a dedicated thread pool so we
+    // don't stall the async Tauri executor.
+    let detected = tokio::task::spawn_blocking(move || run_all_scanners(&config))
+        .await
+        .map_err(|e| AppError::Other(e.to_string()))?;
+
+    let total = detected.len();
 
     let conn = state.db.conn.lock().unwrap();
     let now = Utc::now().to_rfc3339();
@@ -73,8 +50,9 @@ pub async fn trigger_scan(state: State<'_, AppState>, window: Window) -> Result<
     let mut added = 0usize;
     let mut updated = 0usize;
     let mut seen_source_ids: Vec<(String, String)> = Vec::new(); // (source, source_id)
-    // Track which sources returned at least one game — if a source returns zero
-    // results we treat it as a scanner failure and do NOT mark its games deleted.
+
+    // Track which sources actually returned results — a source that returns zero
+    // games is treated as a scanner failure, not "all games uninstalled".
     let mut sources_with_results: std::collections::HashSet<String> =
         std::collections::HashSet::new();
 
@@ -82,7 +60,7 @@ pub async fn trigger_scan(state: State<'_, AppState>, window: Window) -> Result<
         seen_source_ids.push((game.source.as_str().to_string(), game.source_id.clone()));
         sources_with_results.insert(game.source.as_str().to_string());
 
-        // Check if exists
+        // Look up by (source, source_id) first — exact match.
         let existing: Option<(String, String)> = conn
             .query_row(
                 "SELECT id, status FROM games WHERE source = ?1 AND source_id = ?2",
@@ -91,28 +69,54 @@ pub async fn trigger_scan(state: State<'_, AppState>, window: Window) -> Result<
             )
             .ok();
 
+        // If no exact match, check whether a 'custom' entry exists for the same
+        // install_path. This migrates games that were previously discovered by
+        // the custom path scanner to their correct platform source (e.g. "riot").
+        let existing = if existing.is_none() {
+            if let Some(install_path) = &game.install_path {
+                conn.query_row(
+                    "SELECT id, status FROM games WHERE source = 'custom' AND install_path = ?1",
+                    rusqlite::params![install_path],
+                    |row| Ok((row.get(0)?, row.get(1)?)),
+                )
+                .ok()
+                .map(|(id, status): (String, String)| {
+                    // Migrate: update source and source_id to match the platform scanner
+                    let _ = conn.execute(
+                        "UPDATE games SET source = ?1, source_id = ?2 WHERE id = ?3",
+                        rusqlite::params![game.source.as_str(), game.source_id, id],
+                    );
+                    (id, status)
+                })
+            } else {
+                None
+            }
+        } else {
+            existing
+        };
+
         if let Some((existing_id, status)) = existing {
-            // Preserve 'hidden' and user-deleted ('deleted') status across re-scans
-            if status == "deleted" {
-                // User explicitly removed this game — don't resurrect it
+            // Preserve user-deleted and permanently-blocked games — don't resurrect them
+            if status == "deleted" || status == "blocked" {
                 continue;
             }
             conn.execute(
                 "UPDATE games SET name = ?1, install_path = ?2, exe_path = ?3,
+                          cover_url = COALESCE(?4, cover_url),
                           status = CASE WHEN status = 'hidden' THEN 'hidden' ELSE 'installed' END,
-                          deleted_at = NULL, last_scanned_at = ?4
-                 WHERE id = ?5",
+                          deleted_at = NULL, last_scanned_at = ?5
+                 WHERE id = ?6",
                 rusqlite::params![
                     game.name,
                     game.install_path,
                     game.exe_path,
+                    game.cover_url,
                     now,
                     existing_id
                 ],
             )?;
             updated += 1;
         } else {
-            // Insert new game
             let id = Uuid::new_v4().to_string();
             let tags = "[]";
             conn.execute(
@@ -134,14 +138,23 @@ pub async fn trigger_scan(state: State<'_, AppState>, window: Window) -> Result<
         }
     }
 
-    // Mark games not seen in this scan as deleted
+    // All platform sources are always scanned. Auto-deletion only applies to
+    // sources that actually returned results (sources_with_results guard).
+    let scanned_sources: &[&str] = &[
+        "steam", "epic", "gog", "xbox", "riot", "ubisoft", "ea", "battlenet", "custom",
+    ];
+
+    // Mark games not seen in this scan as deleted.
+    // Exclusions:
+    //   - 'manual' source: user-added games, never auto-deleted
+    //   - sources not in scanned_sources: scanner was disabled, don't touch those games
+    //   - sources that returned zero results: scanner likely failed, don't wipe the library
     let deleted_count: usize = {
-        // Get all installed games from scanned sources
-        let scanned_sources: Vec<&str> = vec!["steam", "epic", "gog", "xbox", "riot"];
         let mut deleted = 0usize;
 
         let mut stmt = conn.prepare(
-            "SELECT id, source, source_id FROM games WHERE status = 'installed' AND source != 'manual'",
+            "SELECT id, source, source_id FROM games
+             WHERE status = 'installed' AND source != 'manual'",
         )?;
 
         let existing: Vec<(String, String, String)> = stmt
@@ -149,18 +162,18 @@ pub async fn trigger_scan(state: State<'_, AppState>, window: Window) -> Result<
             .collect::<rusqlite::Result<Vec<_>>>()?;
 
         for (id, source, source_id) in existing {
+            // Skip sources that weren't scanned this run (disabled in settings)
+            if !scanned_sources.contains(&source.as_str()) {
+                continue;
+            }
+
             let still_present = seen_source_ids
                 .iter()
                 .any(|(s, sid)| s == &source && sid == &source_id);
 
-            // Only mark as deleted if the scanner for this source actually returned
-            // some results — a zero-result scan is treated as a scanner failure, not
-            // "all games uninstalled", to avoid wiping the library on e.g. a registry
-            // read error or Steam being mid-update.
-            if !still_present
-                && scanned_sources.contains(&source.as_str())
-                && sources_with_results.contains(&source)
-            {
+            // Only mark as deleted if the scanner returned at least one result
+            // (protects against false-deletes on scanner failure / registry error)
+            if !still_present && sources_with_results.contains(&source) {
                 conn.execute(
                     "UPDATE games SET status = 'deleted', deleted_at = ?1 WHERE id = ?2",
                     rusqlite::params![now, id],
@@ -170,14 +183,6 @@ pub async fn trigger_scan(state: State<'_, AppState>, window: Window) -> Result<
         }
         deleted
     };
-
-    let _ = window.emit(
-        "scan:progress",
-        ScanProgress {
-            stage: "done".to_string(),
-            count: total,
-        },
-    );
 
     Ok(ScanResult {
         added,
