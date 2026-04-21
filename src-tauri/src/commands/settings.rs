@@ -5,6 +5,47 @@ use tauri::State;
 use crate::error::{AppError, Result};
 use crate::state::AppState;
 
+const APP_NAME: &str = "GamerPulse";
+#[cfg(target_os = "windows")]
+const RUN_KEY: &str = "Software\\Microsoft\\Windows\\CurrentVersion\\Run";
+
+#[tauri::command]
+pub fn get_autostart() -> bool {
+    #[cfg(target_os = "windows")]
+    {
+        use winreg::enums::HKEY_CURRENT_USER;
+        use winreg::RegKey;
+        let hkcu = RegKey::predef(HKEY_CURRENT_USER);
+        hkcu.open_subkey(RUN_KEY)
+            .ok()
+            .and_then(|k| k.get_value::<String, _>(APP_NAME).ok())
+            .is_some()
+    }
+    #[cfg(not(target_os = "windows"))]
+    false
+}
+
+#[tauri::command]
+pub fn set_autostart(enabled: bool) -> Result<()> {
+    #[cfg(target_os = "windows")]
+    {
+        use winreg::enums::{HKEY_CURRENT_USER, KEY_SET_VALUE};
+        use winreg::RegKey;
+        let hkcu = RegKey::predef(HKEY_CURRENT_USER);
+        let run_key = hkcu
+            .open_subkey_with_flags(RUN_KEY, KEY_SET_VALUE)
+            .map_err(|e| AppError::Other(e.to_string()))?;
+        if enabled {
+            let exe = std::env::current_exe().map_err(|e| AppError::Other(e.to_string()))?;
+            let val = format!("\"{}\"", exe.display());
+            run_key.set_value(APP_NAME, &val).map_err(|e| AppError::Other(e.to_string()))?;
+        } else {
+            let _ = run_key.delete_value(APP_NAME);
+        }
+    }
+    Ok(())
+}
+
 fn default_true() -> bool {
     true
 }
@@ -123,6 +164,62 @@ pub async fn search_covers(game_name: String, api_key: String) -> Result<Vec<Str
         .map_err(|e| AppError::Other(e.to_string()))?;
 
     let urls: Vec<String> = grids_resp["data"]
+        .as_array()
+        .unwrap_or(&vec![])
+        .iter()
+        .filter_map(|g| g["url"].as_str().map(|s| s.to_string()))
+        .collect();
+
+    Ok(urls)
+}
+
+/// Searches SteamGridDB for hero/background art. Returns wide image URLs.
+#[tauri::command]
+pub async fn search_heroes(game_name: String, api_key: String) -> Result<Vec<String>> {
+    const DEFAULT_KEY: &str = env!("SGDB_API_KEY");
+    let api_key = if api_key.trim().is_empty() {
+        DEFAULT_KEY.to_string()
+    } else {
+        api_key
+    };
+
+    let client = reqwest::Client::new();
+
+    // Step 1: find the game on SteamGridDB
+    let search_url = format!(
+        "https://www.steamgriddb.com/api/v2/search/autocomplete/{}",
+        game_name.replace(' ', "%20")
+    );
+    let search_resp: serde_json::Value = client
+        .get(&search_url)
+        .header("Authorization", format!("Bearer {}", api_key))
+        .send()
+        .await
+        .map_err(|e| AppError::Other(e.to_string()))?
+        .json()
+        .await
+        .map_err(|e| AppError::Other(e.to_string()))?;
+
+    let game_id = search_resp["data"][0]["id"]
+        .as_u64()
+        .ok_or_else(|| AppError::Other("Game not found on SteamGridDB".into()))?;
+
+    // Step 2: fetch hero images (wide format)
+    let heroes_url = format!(
+        "https://www.steamgriddb.com/api/v2/heroes/game/{}?limit=12",
+        game_id
+    );
+    let heroes_resp: serde_json::Value = client
+        .get(&heroes_url)
+        .header("Authorization", format!("Bearer {}", api_key))
+        .send()
+        .await
+        .map_err(|e| AppError::Other(e.to_string()))?
+        .json()
+        .await
+        .map_err(|e| AppError::Other(e.to_string()))?;
+
+    let urls: Vec<String> = heroes_resp["data"]
         .as_array()
         .unwrap_or(&vec![])
         .iter()

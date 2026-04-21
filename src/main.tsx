@@ -22,9 +22,19 @@ ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
         position="bottom-right"
         toastOptions={{
           style: {
-            background: "var(--gt-surface)",
-            color: "var(--gt-text)",
-            border: "1px solid var(--gt-overlay)",
+            background: "rgba(18,18,24,0.95)",
+            color: "rgba(255,255,255,0.9)",
+            border: "1px solid rgba(255,255,255,0.1)",
+            borderRadius: "12px",
+            backdropFilter: "blur(20px)",
+            fontSize: "13px",
+            boxShadow: "0 8px 32px rgba(0,0,0,0.6)",
+          },
+          success: {
+            iconTheme: { primary: "#4ade80", secondary: "rgba(18,18,24,0.95)" },
+          },
+          error: {
+            iconTheme: { primary: "#f87171", secondary: "rgba(18,18,24,0.95)" },
           },
         }}
       />

@@ -16,12 +16,8 @@ export default function StatusBar() {
     enabled: !!currentGameId,
   });
 
-  // Reset start time and elapsed when game changes
   useEffect(() => {
-    if (!currentGameId) {
-      setElapsed(0);
-      return;
-    }
+    if (!currentGameId) { setElapsed(0); return; }
     startTimeRef.current = Date.now();
     setElapsed(0);
     const interval = setInterval(() => {
@@ -33,13 +29,23 @@ export default function StatusBar() {
   if (!currentGameId) return null;
 
   return (
-    <div className="h-7 flex-shrink-0 bg-[var(--gt-surface)] border-t border-[var(--gt-overlay)] flex items-center px-4 gap-2 text-xs text-[var(--gt-sub)]">
-      <Play size={11} className="text-[var(--gt-green)] fill-[var(--gt-green)]" />
-      <span className="text-[var(--gt-green)] font-medium">Now Playing:</span>
-      <span className="text-[var(--gt-text)]">{currentGame?.name ?? "Loading…"}</span>
-      {elapsed > 0 && (
-        <span className="text-[var(--gt-muted)] ml-auto">{formatDuration(elapsed)}</span>
-      )}
+    <div
+      className="flex-shrink-0 flex items-center justify-center py-2 relative z-50"
+      style={{ background: "rgba(0,0,0,0.7)", borderTop: "1px solid rgba(255,255,255,0.06)" }}
+    >
+      <div
+        className="flex items-center gap-2.5 px-4 py-1.5 rounded-full"
+        style={{ background: "rgba(74,222,128,0.12)", border: "1px solid rgba(74,222,128,0.25)" }}
+      >
+        <div className="w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse" />
+        <Play size={10} className="text-green-400 fill-green-400" />
+        <span className="text-xs text-green-400 font-medium">
+          {currentGame?.name ?? "Loading…"}
+        </span>
+        {elapsed > 0 && (
+          <span className="text-xs text-green-400/60">{formatDuration(elapsed)}</span>
+        )}
+      </div>
     </div>
   );
 }

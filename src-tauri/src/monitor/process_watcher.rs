@@ -60,7 +60,32 @@ pub async fn start_monitor(app: AppHandle, state: AppState) {
                 serde_json::json!({ "gameId": game_id, "durationSecs": duration }),
             );
             active.remove(&game_id);
-            session_recorder::check_achievements(&state, &game_id);
+
+            let new_badges = session_recorder::check_achievements(&state, &game_id);
+            if !new_badges.is_empty() {
+                // Resolve the game name once for all badge notifications.
+                let game_name = {
+                    let conn = state.db.conn.lock().unwrap();
+                    conn.query_row(
+                        "SELECT name FROM games WHERE id = ?1",
+                        rusqlite::params![game_id],
+                        |r| r.get::<_, String>(0),
+                    )
+                    .unwrap_or_else(|_| game_id.clone())
+                };
+                for badge in new_badges {
+                    let _ = app.emit(
+                        "achievement:unlocked",
+                        serde_json::json!({
+                            "gameId":           game_id,
+                            "gameName":         game_name,
+                            "badgeKey":         badge.badge_key,
+                            "badgeLabel":       badge.badge_label,
+                            "badgeDescription": badge.badge_description,
+                        }),
+                    );
+                }
+            }
         }
 
         sleep(Duration::from_secs(5)).await;

@@ -104,6 +104,8 @@ pub fn run() {
             commands::sessions::get_sessions,
             commands::sessions::get_recent_sessions,
             commands::sessions::delete_session,
+            commands::sessions::update_session,
+            commands::sessions::update_session_notes,
             // Scanner
             commands::scanner::trigger_scan,
             // Stats
@@ -121,11 +123,26 @@ pub fn run() {
             commands::settings::export_data,
             commands::settings::reset_database,
             commands::settings::search_covers,
+            commands::settings::search_heroes,
             commands::settings::open_db_folder,
+            commands::settings::get_autostart,
+            commands::settings::set_autostart,
             // Goals
             commands::goals::get_goals,
             commands::goals::set_goal,
             commands::goals::delete_goal,
+            // Collections
+            commands::collections::get_collections,
+            commands::collections::get_collection,
+            commands::collections::create_collection,
+            commands::collections::update_collection,
+            commands::collections::delete_collection,
+            commands::collections::reorder_collections,
+            commands::collections::get_collection_games,
+            commands::collections::add_game_to_collection,
+            commands::collections::remove_game_from_collection,
+            commands::collections::reorder_collection_games,
+            commands::collections::get_game_collections,
             // Launcher
             commands::launcher::launch_game,
         ])

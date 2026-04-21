@@ -56,7 +56,7 @@ pub async fn get_games(
 
     let sql = format!(
         r#"SELECT g.id, g.name, g.source, g.source_id, g.install_path, g.exe_path,
-                  g.cover_url, g.status, g.is_favorite, g.notes, g.tags,
+                  g.cover_url, g.bg_url, g.status, g.is_favorite, g.notes, g.tags,
                   g.added_at, g.last_scanned_at, g.deleted_at,
                   COALESCE(SUM(s.duration_secs), 0) AS total_play_secs,
                   MAX(s.started_at) AS last_played_at,
@@ -81,7 +81,7 @@ pub async fn get_game(state: State<'_, AppState>, id: String) -> Result<Game> {
     let conn = state.db.conn.lock().unwrap();
     let game = conn.query_row(
         r#"SELECT g.id, g.name, g.source, g.source_id, g.install_path, g.exe_path,
-                  g.cover_url, g.status, g.is_favorite, g.notes, g.tags,
+                  g.cover_url, g.bg_url, g.status, g.is_favorite, g.notes, g.tags,
                   g.added_at, g.last_scanned_at, g.deleted_at,
                   COALESCE(SUM(s.duration_secs), 0) AS total_play_secs,
                   MAX(s.started_at) AS last_played_at,
@@ -145,6 +145,12 @@ pub async fn update_game(state: State<'_, AppState>, id: String, patch: GamePatc
             conn.execute(
                 "UPDATE games SET cover_url = ?1 WHERE id = ?2",
                 rusqlite::params![cover_url, id],
+            )?;
+        }
+        if let Some(ref bg_url) = patch.bg_url {
+            conn.execute(
+                "UPDATE games SET bg_url = ?1 WHERE id = ?2",
+                rusqlite::params![bg_url, id],
             )?;
         }
         if let Some(ref notes) = patch.notes {
@@ -221,8 +227,12 @@ pub async fn set_favorite(state: State<'_, AppState>, id: String, favorite: bool
 }
 
 fn row_to_game(row: &rusqlite::Row<'_>) -> rusqlite::Result<Game> {
+    // col 0:id 1:name 2:source 3:source_id 4:install_path 5:exe_path
+    // col 6:cover_url 7:bg_url 8:status 9:is_favorite 10:notes 11:tags
+    // col 12:added_at 13:last_scanned_at 14:deleted_at
+    // col 15:total_play_secs 16:last_played_at 17:session_count
     let tags_str: String = row
-        .get::<_, Option<String>>(10)?
+        .get::<_, Option<String>>(11)?
         .unwrap_or_else(|| "[]".to_string());
     let tags: Vec<String> = serde_json::from_str(&tags_str).unwrap_or_default();
 
@@ -234,15 +244,16 @@ fn row_to_game(row: &rusqlite::Row<'_>) -> rusqlite::Result<Game> {
         install_path: row.get(4)?,
         exe_path: row.get(5)?,
         cover_url: row.get(6)?,
-        status: row.get(7)?,
-        is_favorite: row.get::<_, i32>(8)? != 0,
-        notes: row.get(9)?,
+        bg_url: row.get(7)?,
+        status: row.get(8)?,
+        is_favorite: row.get::<_, i32>(9)? != 0,
+        notes: row.get(10)?,
         tags,
-        added_at: row.get(11)?,
-        last_scanned_at: row.get(12)?,
-        deleted_at: row.get(13)?,
-        total_play_secs: row.get(14)?,
-        last_played_at: row.get(15)?,
-        session_count: row.get(16)?,
+        added_at: row.get(12)?,
+        last_scanned_at: row.get(13)?,
+        deleted_at: row.get(14)?,
+        total_play_secs: row.get(15)?,
+        last_played_at: row.get(16)?,
+        session_count: row.get(17)?,
     })
 }

@@ -61,5 +61,37 @@ pub fn get_migrations() -> Migrations<'static> {
             UNIQUE(game_id, period)
         );
         CREATE INDEX IF NOT EXISTS idx_game_goals_game ON game_goals(game_id);",
+    ),
+    M::up(
+        // Migration 3 – collections / shelves
+        "CREATE TABLE IF NOT EXISTS collections (
+            id          TEXT PRIMARY KEY,
+            name        TEXT NOT NULL,
+            description TEXT,
+            color       TEXT NOT NULL DEFAULT '#6c7086',
+            icon        TEXT NOT NULL DEFAULT 'folder',
+            position    INTEGER NOT NULL DEFAULT 0,
+            created_at  TEXT NOT NULL,
+            updated_at  TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_collections_position ON collections(position);
+
+        CREATE TABLE IF NOT EXISTS collection_games (
+            collection_id TEXT NOT NULL REFERENCES collections(id) ON DELETE CASCADE,
+            game_id       TEXT NOT NULL REFERENCES games(id) ON DELETE CASCADE,
+            position      INTEGER NOT NULL DEFAULT 0,
+            added_at      TEXT NOT NULL,
+            PRIMARY KEY (collection_id, game_id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_collection_games_coll ON collection_games(collection_id);
+        CREATE INDEX IF NOT EXISTS idx_collection_games_game ON collection_games(game_id);",
+    ),
+    M::up(
+        // Migration 4 – session notes
+        "ALTER TABLE sessions ADD COLUMN notes TEXT;",
+    ),
+    M::up(
+        // Migration 5 – background/hero image URL per game
+        "ALTER TABLE games ADD COLUMN bg_url TEXT;",
     )])
 }

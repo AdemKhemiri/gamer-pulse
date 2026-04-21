@@ -30,7 +30,8 @@ export default function AchievementBadge({ achievement, small }: Props) {
     return (
       <div
         title={`${achievement.badgeLabel} — ${achievement.badgeDescription}`}
-        className="flex items-center justify-center w-8 h-8 rounded-full bg-[var(--gt-overlay)] text-lg"
+        className="flex items-center justify-center w-8 h-8 rounded-full text-lg"
+        style={{ background: "rgba(255,255,255,0.08)" }}
       >
         {icon}
       </div>
@@ -38,17 +39,23 @@ export default function AchievementBadge({ achievement, small }: Props) {
   }
 
   return (
-    <div className="flex items-center gap-3 p-3 rounded-lg bg-[var(--gt-surface)] border border-[var(--gt-overlay)]">
-      <div className="w-10 h-10 flex items-center justify-center rounded-full bg-[var(--gt-overlay)] text-xl flex-shrink-0">
+    <div
+      className="flex items-center gap-3 p-3 rounded-xl"
+      style={{ background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.08)" }}
+    >
+      <div
+        className="w-10 h-10 flex items-center justify-center rounded-full text-xl flex-shrink-0"
+        style={{ background: "rgba(255,255,255,0.08)" }}
+      >
         {icon}
       </div>
       <div className="min-w-0">
-        <p className="text-sm font-medium text-[var(--gt-text)]">{achievement.badgeLabel}</p>
+        <p className="text-sm font-medium text-white">{achievement.badgeLabel}</p>
         {achievement.gameName && (
           <p className="text-xs text-[var(--gt-accent)] truncate">{achievement.gameName}</p>
         )}
-        <p className="text-xs text-[var(--gt-muted)]">{achievement.badgeDescription}</p>
-        <p className="text-xs text-[var(--gt-hover)] mt-0.5">{formatDate(achievement.earnedAt)}</p>
+        <p className="text-xs text-white/40">{achievement.badgeDescription}</p>
+        <p className="text-xs text-white/25 mt-0.5">{formatDate(achievement.earnedAt)}</p>
       </div>
     </div>
   );

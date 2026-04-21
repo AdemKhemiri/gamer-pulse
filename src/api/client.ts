@@ -11,6 +11,7 @@ export interface Game {
   installPath?: string;
   exePath?: string;
   coverUrl?: string;
+  bgUrl?: string;
   status: GameStatus;
   isFavorite: boolean;
   notes?: string;
@@ -31,6 +32,7 @@ export interface Session {
   endedAt?: string;
   durationSecs?: number;
   processName?: string;
+  notes?: string;
 }
 
 export interface GameStats {
@@ -133,6 +135,7 @@ export interface GamePatch {
   name?: string;
   exePath?: string;
   coverUrl?: string;
+  bgUrl?: string;
   notes?: string;
   tags?: string[];
   isFavorite?: boolean;
@@ -172,6 +175,16 @@ export const getRecentSessions = (limit?: number): Promise<Session[]> =>
 
 export const deleteSession = (sessionId: string): Promise<void> =>
   invoke("delete_session", { sessionId });
+
+export const updateSession = (
+  sessionId: string,
+  startedAt: string,
+  endedAt: string,
+): Promise<Session> =>
+  invoke("update_session", { sessionId, startedAt, endedAt });
+
+export const updateSessionNotes = (sessionId: string, notes: string): Promise<Session> =>
+  invoke("update_session_notes", { sessionId, notes });
 
 // ─── Scanner commands ─────────────────────────────────────────────────────────
 
@@ -232,6 +245,15 @@ export const openDbFolder = (): Promise<void> =>
 export const searchCovers = (gameName: string, apiKey: string): Promise<string[]> =>
   invoke("search_covers", { gameName, apiKey });
 
+export const getAutostart = (): Promise<boolean> =>
+  invoke("get_autostart");
+
+export const setAutostart = (enabled: boolean): Promise<void> =>
+  invoke("set_autostart", { enabled });
+
+export const searchHeroes = (gameName: string, apiKey: string): Promise<string[]> =>
+  invoke("search_heroes", { gameName, apiKey });
+
 // ─── Goals ───────────────────────────────────────────────────────────────────
 
 export type GoalPeriod = "weekly" | "monthly" | "total";
@@ -255,6 +277,71 @@ export const setGoal = (gameId: string, period: GoalPeriod, targetSecs: number):
 
 export const deleteGoal = (gameId: string, period: GoalPeriod): Promise<void> =>
   invoke("delete_goal", { gameId, period });
+
+// ─── Collections ─────────────────────────────────────────────────────────────
+
+export interface Collection {
+  id: string;
+  name: string;
+  description?: string;
+  /** Hex color string, e.g. "#6c7086" */
+  color: string;
+  /** Lucide icon name, e.g. "folder", "gamepad-2", "star" */
+  icon: string;
+  /** Sort order among collections */
+  position: number;
+  createdAt: string;
+  updatedAt: string;
+  /** Number of games in this collection */
+  gameCount: number;
+}
+
+export interface NewCollection {
+  name: string;
+  description?: string;
+  color?: string;
+  icon?: string;
+}
+
+export interface CollectionPatch {
+  name?: string;
+  description?: string;
+  color?: string;
+  icon?: string;
+}
+
+export const getCollections = (): Promise<Collection[]> =>
+  invoke("get_collections");
+
+export const getCollection = (id: string): Promise<Collection> =>
+  invoke("get_collection", { id });
+
+export const createCollection = (payload: NewCollection): Promise<Collection> =>
+  invoke("create_collection", { payload });
+
+export const updateCollection = (id: string, patch: CollectionPatch): Promise<Collection> =>
+  invoke("update_collection", { id, patch });
+
+export const deleteCollection = (id: string): Promise<void> =>
+  invoke("delete_collection", { id });
+
+export const reorderCollections = (ids: string[]): Promise<Collection[]> =>
+  invoke("reorder_collections", { ids });
+
+export const getCollectionGames = (collectionId: string): Promise<Game[]> =>
+  invoke("get_collection_games", { collectionId });
+
+export const addGameToCollection = (collectionId: string, gameId: string): Promise<void> =>
+  invoke("add_game_to_collection", { collectionId, gameId });
+
+export const removeGameFromCollection = (collectionId: string, gameId: string): Promise<void> =>
+  invoke("remove_game_from_collection", { collectionId, gameId });
+
+export const reorderCollectionGames = (collectionId: string, gameIds: string[]): Promise<Game[]> =>
+  invoke("reorder_collection_games", { collectionId, gameIds });
+
+export const getGameCollections = (gameId: string): Promise<Collection[]> =>
+  invoke("get_game_collections", { gameId });
 
 // ─── Launch ───────────────────────────────────────────────────────────────────
 

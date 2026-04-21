@@ -3,55 +3,79 @@ use uuid::Uuid;
 
 use crate::state::AppState;
 
-pub fn start_session(state: &AppState, game_id: &str, pid: u32, process_name: Option<&str>) {
-    let conn = state.db.conn.lock().unwrap();
-    let id = Uuid::new_v4().to_string();
-    let now = Utc::now().to_rfc3339();
+// ─── Types ────────────────────────────────────────────────────────────────────
 
-    let _ = conn.execute(
-        "INSERT INTO sessions (id, game_id, started_at, process_name, pid)
-         VALUES (?1, ?2, ?3, ?4, ?5)",
-        rusqlite::params![id, game_id, now, process_name, pid as i64],
-    );
+/// A badge that was just unlocked during an achievement check.
+#[derive(Debug)]
+pub struct UnlockedBadge {
+    pub badge_key: String,
+    pub badge_label: String,
+    pub badge_description: String,
 }
 
-/// Closes the most recent open session for this game. Returns duration in seconds.
-pub fn end_session(state: &AppState, game_id: &str) -> Option<i64> {
-    let conn = state.db.conn.lock().unwrap();
-    let now = Utc::now().to_rfc3339();
+// ─── Badge catalogue ──────────────────────────────────────────────────────────
 
-    // Find open session
-    let session_id: Option<(String, String)> = conn
+/// Complete badge catalogue: (key, display_label, description).
+static BADGE_CATALOGUE: &[(&str, &str, &str)] = &[
+    ("first_hour",       "First Hour",    "Played for 1 hour"),
+    ("ten_hours",        "Dedicated",     "Played for 10 hours"),
+    ("fifty_hours",      "Veteran",       "Played for 50 hours"),
+    ("hundred_hours",    "Century",       "Played for 100 hours"),
+    ("night_owl",        "Night Owl",     "Played past midnight"),
+    ("marathon",         "Marathon",      "Played 3+ hours in a single session"),
+    ("dedicated_streak", "On a Roll",     "Played 7 days in a row"),
+    ("speed_runner",     "Speed Runner",  "Completed a session in under 30 minutes"),
+    ("early_bird",       "Early Bird",    "Started a session between 4 am and 7 am"),
+    ("variety_pack",     "Variety Pack",  "Played 5 different games"),
+    ("collector",        "Collector",     "Played 10 different games"),
+    ("game_hoarder",     "Game Hoarder",  "Played 25 different games"),
+    ("total_100h",       "Century Club",  "100+ hours across all games"),
+    ("total_500h",       "Legend",        "500+ hours across all games"),
+];
+
+fn badge_meta(key: &str) -> (&'static str, &'static str) {
+    BADGE_CATALOGUE
+        .iter()
+        .find(|(k, _, _)| *k == key)
+        .map(|(_, label, desc)| (*label, *desc))
+        .unwrap_or(("Achievement", ""))
+}
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+/// Insert a badge row if not already present.
+/// Returns `Some(UnlockedBadge)` only when the badge is newly awarded.
+fn try_award(
+    conn: &rusqlite::Connection,
+    game_id: &str,
+    badge_key: &str,
+    now: &str,
+) -> Option<UnlockedBadge> {
+    let already_earned: bool = conn
         .query_row(
-            "SELECT id, started_at FROM sessions WHERE game_id = ?1 AND ended_at IS NULL
-             ORDER BY started_at DESC LIMIT 1",
-            rusqlite::params![game_id],
-            |row| Ok((row.get(0)?, row.get(1)?)),
+            "SELECT COUNT(*) FROM achievements WHERE game_id = ?1 AND badge_key = ?2",
+            rusqlite::params![game_id, badge_key],
+            |row| row.get::<_, i64>(0),
         )
-        .ok();
+        .unwrap_or(0)
+        > 0;
 
-    let (session_id, started_at) = session_id?;
-
-    // Calculate duration
-    let started = chrono::DateTime::parse_from_rfc3339(&started_at).ok()?;
-    let ended = chrono::DateTime::parse_from_rfc3339(&now).ok()?;
-    let duration = (ended - started).num_seconds().max(0);
-
-    // Discard sessions shorter than 1 minute (accidental launches, crashes, etc.)
-    if duration < 60 {
-        let _ = conn.execute(
-            "DELETE FROM sessions WHERE id = ?1",
-            rusqlite::params![session_id],
-        );
+    if already_earned {
         return None;
     }
 
+    let id = Uuid::new_v4().to_string();
     let _ = conn.execute(
-        "UPDATE sessions SET ended_at = ?1, duration_secs = ?2 WHERE id = ?3",
-        rusqlite::params![now, duration, session_id],
+        "INSERT INTO achievements (id, game_id, badge_key, earned_at) VALUES (?1, ?2, ?3, ?4)",
+        rusqlite::params![id, game_id, badge_key, now],
     );
 
-    Some(duration)
+    let (label, desc) = badge_meta(badge_key);
+    Some(UnlockedBadge {
+        badge_key: badge_key.to_owned(),
+        badge_label: label.to_owned(),
+        badge_description: desc.to_owned(),
+    })
 }
 
 fn longest_streak_for_game(conn: &rusqlite::Connection, game_id: &str) -> i64 {
@@ -63,6 +87,7 @@ fn longest_streak_for_game(conn: &rusqlite::Connection, game_id: &str) -> i64 {
         Ok(s) => s,
         Err(_) => return 0,
     };
+
     let days: Vec<String> = stmt
         .query_map(rusqlite::params![game_id], |r| r.get(0))
         .unwrap()
@@ -90,12 +115,65 @@ fn longest_streak_for_game(conn: &rusqlite::Connection, game_id: &str) -> i64 {
     longest.max(run)
 }
 
-/// Award achievements based on cumulative playtime and session history.
-pub fn check_achievements(state: &AppState, game_id: &str) {
+// ─── Public API ───────────────────────────────────────────────────────────────
+
+pub fn start_session(state: &AppState, game_id: &str, pid: u32, process_name: Option<&str>) {
+    let conn = state.db.conn.lock().unwrap();
+    let id = Uuid::new_v4().to_string();
+    let now = Utc::now().to_rfc3339();
+
+    let _ = conn.execute(
+        "INSERT INTO sessions (id, game_id, started_at, process_name, pid)
+         VALUES (?1, ?2, ?3, ?4, ?5)",
+        rusqlite::params![id, game_id, now, process_name, pid as i64],
+    );
+}
+
+/// Closes the most recent open session for this game. Returns duration in seconds.
+pub fn end_session(state: &AppState, game_id: &str) -> Option<i64> {
     let conn = state.db.conn.lock().unwrap();
     let now = Utc::now().to_rfc3339();
 
-    // Get total playtime for this game
+    let session_id: Option<(String, String)> = conn
+        .query_row(
+            "SELECT id, started_at FROM sessions WHERE game_id = ?1 AND ended_at IS NULL
+             ORDER BY started_at DESC LIMIT 1",
+            rusqlite::params![game_id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .ok();
+
+    let (session_id, started_at) = session_id?;
+
+    let started = chrono::DateTime::parse_from_rfc3339(&started_at).ok()?;
+    let ended = chrono::DateTime::parse_from_rfc3339(&now).ok()?;
+    let duration = (ended - started).num_seconds().max(0);
+
+    // Discard sessions shorter than 1 minute (accidental launches, crashes, etc.)
+    if duration < 60 {
+        let _ = conn.execute(
+            "DELETE FROM sessions WHERE id = ?1",
+            rusqlite::params![session_id],
+        );
+        return None;
+    }
+
+    let _ = conn.execute(
+        "UPDATE sessions SET ended_at = ?1, duration_secs = ?2 WHERE id = ?3",
+        rusqlite::params![now, duration, session_id],
+    );
+
+    Some(duration)
+}
+
+/// Award achievements based on the completed session. Returns every badge that was
+/// newly unlocked so the caller can surface notifications.
+pub fn check_achievements(state: &AppState, game_id: &str) -> Vec<UnlockedBadge> {
+    let conn = state.db.conn.lock().unwrap();
+    let now = Utc::now().to_rfc3339();
+    let mut unlocked: Vec<UnlockedBadge> = Vec::new();
+
+    // ── Cumulative playtime milestones ─────────────────────────────────────────
     let total_secs: i64 = conn
         .query_row(
             "SELECT COALESCE(SUM(duration_secs), 0) FROM sessions
@@ -105,197 +183,108 @@ pub fn check_achievements(state: &AppState, game_id: &str) {
         )
         .unwrap_or(0);
 
-    let _session_count: i64 = conn
-        .query_row(
-            "SELECT COUNT(*) FROM sessions WHERE game_id = ?1 AND ended_at IS NOT NULL",
-            rusqlite::params![game_id],
-            |row| row.get(0),
-        )
-        .unwrap_or(0);
-
-    let badges: &[(&str, i64, &str)] = &[
-        ("first_hour", 3600, "first_hour"),
-        ("ten_hours", 36000, "ten_hours"),
-        ("fifty_hours", 180000, "fifty_hours"),
-        ("hundred_hours", 360000, "hundred_hours"),
-    ];
-
-    for (badge_key, threshold_secs, _) in badges {
-        if total_secs >= *threshold_secs {
-            // Check if already awarded
-            let exists: bool = conn
-                .query_row(
-                    "SELECT COUNT(*) FROM achievements WHERE game_id = ?1 AND badge_key = ?2",
-                    rusqlite::params![game_id, badge_key],
-                    |row| row.get::<_, i64>(0),
-                )
-                .unwrap_or(0)
-                > 0;
-
-            if !exists {
-                let id = Uuid::new_v4().to_string();
-                let _ = conn.execute(
-                    "INSERT INTO achievements (id, game_id, badge_key, earned_at)
-                     VALUES (?1, ?2, ?3, ?4)",
-                    rusqlite::params![id, game_id, badge_key, now],
-                );
+    for (badge_key, threshold) in &[
+        ("first_hour",    3_600_i64),
+        ("ten_hours",    36_000_i64),
+        ("fifty_hours",  180_000_i64),
+        ("hundred_hours",360_000_i64),
+    ] {
+        if total_secs >= *threshold {
+            if let Some(b) = try_award(&conn, game_id, badge_key, &now) {
+                unlocked.push(b);
             }
         }
     }
 
-    // Night Owl: session that ended after midnight (00:00-06:00)
-    let night_owl_exists: bool = conn
+    // ── Night Owl: session ended 00:00–05:59 local ────────────────────────────
+    let has_night: bool = conn
         .query_row(
-            "SELECT COUNT(*) FROM achievements WHERE game_id = ?1 AND badge_key = 'night_owl'",
+            "SELECT COUNT(*) FROM sessions WHERE game_id = ?1
+             AND ended_at IS NOT NULL
+             AND CAST(strftime('%H', ended_at, 'localtime') AS INTEGER) < 6",
             rusqlite::params![game_id],
             |row| row.get::<_, i64>(0),
         )
         .unwrap_or(0)
         > 0;
 
-    if !night_owl_exists {
-        let late_session: bool = conn
-            .query_row(
-                "SELECT COUNT(*) FROM sessions WHERE game_id = ?1
-                 AND ended_at IS NOT NULL
-                 AND CAST(strftime('%H', ended_at, 'localtime') AS INTEGER) < 6",
-                rusqlite::params![game_id],
-                |row| row.get::<_, i64>(0),
-            )
-            .unwrap_or(0)
-            > 0;
-
-        if late_session {
-            let id = Uuid::new_v4().to_string();
-            let _ = conn.execute(
-                "INSERT INTO achievements (id, game_id, badge_key, earned_at)
-                 VALUES (?1, ?2, 'night_owl', ?3)",
-                rusqlite::params![id, game_id, now],
-            );
+    if has_night {
+        if let Some(b) = try_award(&conn, game_id, "night_owl", &now) {
+            unlocked.push(b);
         }
     }
 
-    // Marathon: single session >= 3 hours
-    let marathon_exists: bool = conn
+    // ── Marathon: single session ≥ 3 hours ────────────────────────────────────
+    let has_marathon: bool = conn
         .query_row(
-            "SELECT COUNT(*) FROM achievements WHERE game_id = ?1 AND badge_key = 'marathon'",
+            "SELECT COUNT(*) FROM sessions WHERE game_id = ?1
+             AND ended_at IS NOT NULL AND duration_secs >= 10800",
             rusqlite::params![game_id],
             |row| row.get::<_, i64>(0),
         )
         .unwrap_or(0)
         > 0;
 
-    if !marathon_exists {
-        let has_marathon: bool = conn
-            .query_row(
-                "SELECT COUNT(*) FROM sessions WHERE game_id = ?1
-                 AND ended_at IS NOT NULL AND duration_secs >= 10800",
-                rusqlite::params![game_id],
-                |row| row.get::<_, i64>(0),
-            )
-            .unwrap_or(0)
-            > 0;
-
-        if has_marathon {
-            let id = Uuid::new_v4().to_string();
-            let _ = conn.execute(
-                "INSERT INTO achievements (id, game_id, badge_key, earned_at)
-                 VALUES (?1, ?2, 'marathon', ?3)",
-                rusqlite::params![id, game_id, now],
-            );
+    if has_marathon {
+        if let Some(b) = try_award(&conn, game_id, "marathon", &now) {
+            unlocked.push(b);
         }
     }
 
-    // Dedicated: 7-day play streak on this game
-    let dedicated_exists: bool = conn
-        .query_row(
-            "SELECT COUNT(*) FROM achievements WHERE game_id = ?1 AND badge_key = 'dedicated_streak'",
-            rusqlite::params![game_id],
-            |row| row.get::<_, i64>(0),
-        )
-        .unwrap_or(0)
-        > 0;
-
-    if !dedicated_exists && longest_streak_for_game(&conn, game_id) >= 7 {
-        let id = Uuid::new_v4().to_string();
-        let _ = conn.execute(
-            "INSERT INTO achievements (id, game_id, badge_key, earned_at)
-             VALUES (?1, ?2, 'dedicated_streak', ?3)",
-            rusqlite::params![id, game_id, now],
-        );
-    }
-
-    // Speed Runner: completed a session between 5 and 30 minutes
-    let speed_exists: bool = conn
-        .query_row(
-            "SELECT COUNT(*) FROM achievements WHERE game_id = ?1 AND badge_key = 'speed_runner'",
-            rusqlite::params![game_id],
-            |row| row.get::<_, i64>(0),
-        )
-        .unwrap_or(0)
-        > 0;
-
-    if !speed_exists {
-        let has_speed: bool = conn
-            .query_row(
-                "SELECT COUNT(*) FROM sessions WHERE game_id = ?1
-                 AND ended_at IS NOT NULL AND duration_secs >= 300 AND duration_secs < 1800",
-                rusqlite::params![game_id],
-                |row| row.get::<_, i64>(0),
-            )
-            .unwrap_or(0)
-            > 0;
-
-        if has_speed {
-            let id = Uuid::new_v4().to_string();
-            let _ = conn.execute(
-                "INSERT INTO achievements (id, game_id, badge_key, earned_at)
-                 VALUES (?1, ?2, 'speed_runner', ?3)",
-                rusqlite::params![id, game_id, now],
-            );
+    // ── Dedicated Streak: 7 consecutive days on this game ─────────────────────
+    if longest_streak_for_game(&conn, game_id) >= 7 {
+        if let Some(b) = try_award(&conn, game_id, "dedicated_streak", &now) {
+            unlocked.push(b);
         }
     }
 
-    // Early Bird: session started before 7am local time
-    let early_exists: bool = conn
+    // ── Speed Runner: session between 5–30 minutes ────────────────────────────
+    let has_speed: bool = conn
         .query_row(
-            "SELECT COUNT(*) FROM achievements WHERE game_id = ?1 AND badge_key = 'early_bird'",
+            "SELECT COUNT(*) FROM sessions WHERE game_id = ?1
+             AND ended_at IS NOT NULL AND duration_secs >= 300 AND duration_secs < 1800",
             rusqlite::params![game_id],
             |row| row.get::<_, i64>(0),
         )
         .unwrap_or(0)
         > 0;
 
-    if !early_exists {
-        let has_early: bool = conn
-            .query_row(
-                "SELECT COUNT(*) FROM sessions WHERE game_id = ?1
-                 AND ended_at IS NOT NULL
-                 AND CAST(strftime('%H', started_at, 'localtime') AS INTEGER) BETWEEN 4 AND 6",
-                rusqlite::params![game_id],
-                |row| row.get::<_, i64>(0),
-            )
-            .unwrap_or(0)
-            > 0;
-
-        if has_early {
-            let id = Uuid::new_v4().to_string();
-            let _ = conn.execute(
-                "INSERT INTO achievements (id, game_id, badge_key, earned_at)
-                 VALUES (?1, ?2, 'early_bird', ?3)",
-                rusqlite::params![id, game_id, now],
-            );
+    if has_speed {
+        if let Some(b) = try_award(&conn, game_id, "speed_runner", &now) {
+            unlocked.push(b);
         }
     }
 
+    // ── Early Bird: session started 04:00–06:59 local ─────────────────────────
+    let has_early: bool = conn
+        .query_row(
+            "SELECT COUNT(*) FROM sessions WHERE game_id = ?1
+             AND ended_at IS NOT NULL
+             AND CAST(strftime('%H', started_at, 'localtime') AS INTEGER) BETWEEN 4 AND 6",
+            rusqlite::params![game_id],
+            |row| row.get::<_, i64>(0),
+        )
+        .unwrap_or(0)
+        > 0;
+
+    if has_early {
+        if let Some(b) = try_award(&conn, game_id, "early_bird", &now) {
+            unlocked.push(b);
+        }
+    }
+
+    // ── Global achievements (cross-game) ──────────────────────────────────────
     drop(conn);
-    check_global_achievements(state, &now);
+    unlocked.extend(check_global_achievements(state, &now));
+
+    unlocked
 }
 
-fn check_global_achievements(state: &AppState, now: &str) {
+fn check_global_achievements(state: &AppState, now: &str) -> Vec<UnlockedBadge> {
     let conn = state.db.conn.lock().unwrap();
+    let mut unlocked: Vec<UnlockedBadge> = Vec::new();
 
-    // Ensure the __global__ placeholder game exists once
+    // Ensure the __global__ placeholder game exists
     let _ = conn.execute(
         "INSERT OR IGNORE INTO games (id, name, source, status, added_at)
          VALUES ('__global__', 'Global', 'manual', 'hidden', ?1)",
@@ -318,43 +307,30 @@ fn check_global_achievements(state: &AppState, now: &str) {
         )
         .unwrap_or(0);
 
-    // Helper closure to award a global badge if not already earned
-    let award = |badge_key: &str| {
-        let exists: bool = conn
-            .query_row(
-                "SELECT COUNT(*) FROM achievements WHERE game_id = '__global__' AND badge_key = ?1",
-                rusqlite::params![badge_key],
-                |row| row.get::<_, i64>(0),
-            )
-            .unwrap_or(0)
-            > 0;
-
-        if !exists {
-            let id = Uuid::new_v4().to_string();
-            let _ = conn.execute(
-                "INSERT INTO achievements (id, game_id, badge_key, earned_at)
-                 VALUES (?1, '__global__', ?2, ?3)",
-                rusqlite::params![id, badge_key, now],
-            );
+    for (threshold, badge_key) in &[
+        (5i64,  "variety_pack"),
+        (10i64, "collector"),
+        (25i64, "game_hoarder"),
+    ] {
+        if unique_games >= *threshold {
+            if let Some(b) = try_award(&conn, "__global__", badge_key, now) {
+                unlocked.push(b);
+            }
         }
-    };
-
-    if unique_games >= 5 {
-        award("variety_pack");
-    }
-    if unique_games >= 10 {
-        award("collector");
-    }
-    if unique_games >= 25 {
-        award("game_hoarder");
     }
 
-    if total_secs >= 360_000 {
-        award("total_100h");
+    for (threshold_secs, badge_key) in &[
+        (360_000_i64,   "total_100h"),
+        (1_800_000_i64, "total_500h"),
+    ] {
+        if total_secs >= *threshold_secs {
+            if let Some(b) = try_award(&conn, "__global__", badge_key, now) {
+                unlocked.push(b);
+            }
+        }
     }
-    if total_secs >= 1_800_000 {
-        award("total_500h");
-    }
+
+    unlocked
 }
 
 /// On startup: close any sessions left open from a previous crash, preserving elapsed time.

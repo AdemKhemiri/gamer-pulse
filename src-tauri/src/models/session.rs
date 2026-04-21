@@ -10,4 +10,5 @@ pub struct Session {
     pub ended_at: Option<String>,
     pub duration_secs: Option<i64>,
     pub process_name: Option<String>,
+    pub notes: Option<String>,
 }

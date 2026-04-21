@@ -1,3 +1,4 @@
+pub mod collections;
 pub mod games;
 pub mod goals;
 pub mod launcher;

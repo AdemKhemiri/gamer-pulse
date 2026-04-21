@@ -1,7 +1,7 @@
 import { useState, useRef } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, Star, Calendar, EyeOff, Eye, Pencil, Link, Upload, X, Trash2, FolderOpen, Target, Plus, Check } from "lucide-react";
+import { ArrowLeft, Star, Calendar, EyeOff, Eye, Pencil, Link, Upload, X, Trash2, FolderOpen, Target, Plus, Check, MessageSquare } from "lucide-react";
 import { open as openFileDialog } from "@tauri-apps/plugin-dialog";
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell,
@@ -9,9 +9,12 @@ import {
 import toast from "react-hot-toast";
 import {
   getGame, getGameStats, getSessions, getAchievements,
-  getHeatmap, setFavorite, updateGame, searchCovers, getSettings, deleteSession, GamePatch,
+  getHeatmap, setFavorite, updateGame, searchCovers, getSettings,
+  deleteSession, updateSession, updateSessionNotes, GamePatch,
   getGoals, setGoal, deleteGoal, GameGoal, GoalPeriod,
+  getCollections, getGameCollections, addGameToCollection, removeGameFromCollection,
 } from "../api/client";
+import { CollectionIcon } from "./Collections";
 import {
   formatHours, formatDuration, formatDate, formatRelative, sourceLabel,
 } from "../utils/format";
@@ -22,6 +25,16 @@ const PLACEHOLDER =
   "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='300' height='450' viewBox='0 0 300 450'%3E%3Crect fill='%23313244' width='300' height='450'/%3E%3Ctext fill='%236c7086' font-size='80' text-anchor='middle' x='150' y='260'%3E🎮%3C/text%3E%3C/svg%3E";
 
 const CURRENT_YEAR = new Date().getFullYear();
+
+/** Convert a UTC ISO timestamp to the value expected by <input type="datetime-local">. */
+function toDatetimeLocal(iso: string): string {
+  const d = new Date(iso);
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return (
+    `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}` +
+    `T${pad(d.getHours())}:${pad(d.getMinutes())}`
+  );
+}
 
 type Tab = "overview" | "sessions" | "history" | "achievements";
 
@@ -46,10 +59,16 @@ export default function GameDetail() {
   const [showGoalForm, setShowGoalForm] = useState(false);
   const [goalPeriod, setGoalPeriod] = useState<GoalPeriod>("weekly");
   const [goalHours, setGoalHours] = useState("");
+  const [showCollectionPicker, setShowCollectionPicker] = useState(false);
   const [heatmapYear, setHeatmapYear] = useState(CURRENT_YEAR);
   const [showCoverEditor, setShowCoverEditor] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [confirmDeleteSessionId, setConfirmDeleteSessionId] = useState<string | null>(null);
+  const [editSessionId, setEditSessionId] = useState<string | null>(null);
+  const [editStart, setEditStart] = useState("");
+  const [editEnd, setEditEnd] = useState("");
+  const [noteSessionId, setNoteSessionId] = useState<string | null>(null);
+  const [noteValue, setNoteValue] = useState("");
   const [coverTab, setCoverTab] = useState<"url" | "search">("url");
   const [coverSearchResults, setCoverSearchResults] = useState<string[]>([]);
   const [coverSearching, setCoverSearching] = useState(false);
@@ -90,6 +109,38 @@ export default function GameDetail() {
     queryKey: ["goals", id],
     queryFn: () => getGoals(id!),
     enabled: !!id,
+  });
+
+  const { data: gameCollections = [] } = useQuery({
+    queryKey: ["gameCollections", id],
+    queryFn: () => getGameCollections(id!),
+    enabled: !!id,
+  });
+
+  const { data: allCollections = [] } = useQuery({
+    queryKey: ["collections"],
+    queryFn: getCollections,
+    enabled: showCollectionPicker,
+  });
+
+  const addToCollectionMutation = useMutation({
+    mutationFn: (collectionId: string) => addGameToCollection(collectionId, id!),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["gameCollections", id] });
+      queryClient.invalidateQueries({ queryKey: ["collections"] });
+      queryClient.invalidateQueries({ queryKey: ["collectionGames"] });
+    },
+    onError: () => toast.error("Failed to add to collection"),
+  });
+
+  const removeFromCollectionMutation = useMutation({
+    mutationFn: (collectionId: string) => removeGameFromCollection(collectionId, id!),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["gameCollections", id] });
+      queryClient.invalidateQueries({ queryKey: ["collections"] });
+      queryClient.invalidateQueries({ queryKey: ["collectionGames"] });
+    },
+    onError: () => toast.error("Failed to remove from collection"),
   });
 
   const setGoalMutation = useMutation({
@@ -146,9 +197,35 @@ export default function GameDetail() {
     onError: () => toast.error("Failed to delete session"),
   });
 
+  const updateSessionMutation = useMutation({
+    mutationFn: ({ sessionId, startedAt, endedAt }: { sessionId: string; startedAt: string; endedAt: string }) =>
+      updateSession(sessionId, startedAt, endedAt),
+    onSuccess: () => {
+      setEditSessionId(null);
+      queryClient.invalidateQueries({ queryKey: ["sessions", id] });
+      queryClient.invalidateQueries({ queryKey: ["gameStats", id] });
+      queryClient.invalidateQueries({ queryKey: ["globalStats"] });
+      queryClient.invalidateQueries({ queryKey: ["heatmap"] });
+      toast.success("Session updated");
+    },
+    onError: (e: unknown) =>
+      toast.error(e instanceof Error ? e.message : "Failed to update session"),
+  });
+
+  const updateSessionNotesMutation = useMutation({
+    mutationFn: ({ sessionId, notes }: { sessionId: string; notes: string }) =>
+      updateSessionNotes(sessionId, notes),
+    onSuccess: () => {
+      setNoteSessionId(null);
+      queryClient.invalidateQueries({ queryKey: ["sessions", id] });
+      toast.success("Note saved");
+    },
+    onError: () => toast.error("Failed to save note"),
+  });
+
   if (!game) {
     return (
-      <div className="flex items-center justify-center h-full text-[var(--gt-muted)]">
+      <div className="flex items-center justify-center h-full text-white/40">
         Loading…
       </div>
     );
@@ -180,9 +257,9 @@ export default function GameDetail() {
   }
 
   return (
-    <div className="flex h-full overflow-hidden">
+    <div className="flex h-full overflow-hidden" style={{ background: "#050505" }}>
       {/* Left panel */}
-      <div className="w-52 flex-shrink-0 border-r border-[var(--gt-overlay)] bg-[var(--gt-surface)] flex flex-col overflow-auto">
+      <div className="w-52 flex-shrink-0 flex flex-col overflow-auto" style={{ background: "rgba(255,255,255,0.03)", borderRight: "1px solid rgba(255,255,255,0.07)" }}>
         {/* Cover image with edit overlay */}
         <div className="relative group/cover">
           <img
@@ -204,17 +281,18 @@ export default function GameDetail() {
 
         <div className="p-4 space-y-3">
           <EditableName name={game.name} onSave={(name) => updateMutation.mutate({ name })} />
-          <p className="text-xs text-[var(--gt-muted)]">{sourceLabel(game.source)}</p>
+          <p className="text-xs text-white/40">{sourceLabel(game.source)}</p>
 
           <button
             onClick={() => favMutation.mutate(!game.isFavorite)}
             className={`flex items-center gap-2 text-xs px-3 py-1.5 rounded-md border transition-colors w-full ${
               game.isFavorite
-                ? "bg-[var(--gt-yellow)]/10 border-[var(--gt-yellow)]/30 text-[var(--gt-yellow)]"
-                : "border-[var(--gt-overlay)] text-[var(--gt-muted)] hover:text-[var(--gt-text)]"
+                ? "border-yellow-400/30 text-yellow-400"
+                : "border-white/10 text-white/40 hover:text-white"
             }`}
+            style={game.isFavorite ? { background: "rgba(250,204,21,0.1)" } : {}}
           >
-            <Star size={13} className={game.isFavorite ? "fill-[var(--gt-yellow)]" : ""} />
+            <Star size={13} className={game.isFavorite ? "fill-yellow-400" : ""} />
             {game.isFavorite ? "Favorited" : "Add to Favorites"}
           </button>
 
@@ -224,9 +302,10 @@ export default function GameDetail() {
             }
             className={`flex items-center gap-2 text-xs px-3 py-1.5 rounded-md border transition-colors w-full ${
               isHidden
-                ? "bg-[var(--gt-accent)]/10 border-[var(--gt-accent)]/30 text-[var(--gt-accent)]"
-                : "border-[var(--gt-overlay)] text-[var(--gt-muted)] hover:text-[var(--gt-text)]"
+                ? "border-blue-400/30 text-blue-400"
+                : "border-white/10 text-white/40 hover:text-white"
             }`}
+            style={isHidden ? { background: "rgba(96,165,250,0.1)" } : {}}
           >
             {isHidden ? <Eye size={13} /> : <EyeOff size={13} />}
             {isHidden ? "Unhide Game" : "Hide Game"}
@@ -235,25 +314,25 @@ export default function GameDetail() {
           {!confirmDelete ? (
             <button
               onClick={() => setConfirmDelete(true)}
-              className="flex items-center gap-2 text-xs px-3 py-1.5 rounded-md border border-[var(--gt-red)]/30 text-[var(--gt-red)]/70 hover:text-[var(--gt-red)] hover:border-[var(--gt-red)]/50 transition-colors w-full"
+              className="flex items-center gap-2 text-xs px-3 py-1.5 rounded-md border border-red-500/30 text-red-400/70 hover:text-red-400 hover:border-red-500/50 transition-colors w-full"
             >
               <Trash2 size={13} />
               Remove Game
             </button>
           ) : (
             <div className="space-y-1">
-              <p className="text-[10px] text-[var(--gt-red)] px-1">Remove permanently?</p>
+              <p className="text-[10px] text-red-400 px-1">Remove permanently?</p>
               <div className="flex gap-1">
                 <button
                   onClick={() => deleteMutation.mutate()}
                   disabled={deleteMutation.isPending}
-                  className="flex-1 text-xs py-1.5 rounded-md bg-[var(--gt-red)] text-[var(--gt-base)] font-medium hover:bg-[var(--gt-red)]/80 disabled:opacity-50 transition-colors"
+                  className="flex-1 text-xs py-1.5 rounded-md bg-red-500 text-white font-medium hover:bg-red-500/80 disabled:opacity-50 transition-colors"
                 >
                   Remove
                 </button>
                 <button
                   onClick={() => setConfirmDelete(false)}
-                  className="flex-1 text-xs py-1.5 rounded-md border border-[var(--gt-overlay)] text-[var(--gt-sub)] hover:text-[var(--gt-text)] transition-colors"
+                  className="flex-1 text-xs py-1.5 rounded-md border border-white/10 text-white/50 hover:text-white transition-colors"
                 >
                   Cancel
                 </button>
@@ -261,7 +340,7 @@ export default function GameDetail() {
             </div>
           )}
 
-          <div className="space-y-2 pt-2 border-t border-[var(--gt-overlay)]">
+          <div className="space-y-2 pt-2 border-t border-white/8">
             <Stat label="Total Playtime" value={stats ? formatHours(stats.totalSecs) : "—"} />
             <Stat label="Sessions" value={String(stats?.sessionCount ?? 0)} />
             <Stat
@@ -282,8 +361,8 @@ export default function GameDetail() {
             />
           </div>
 
-          <div className="pt-2 border-t border-[var(--gt-overlay)]">
-            <p className="text-[10px] text-[var(--gt-muted)] mb-1">Executable Path</p>
+          <div className="pt-2 border-t border-white/8">
+            <p className="text-[10px] text-white/40 mb-1">Executable Path</p>
             <ExePathEditor
               exePath={game.exePath ?? ""}
               onSave={(exePath) => updateMutation.mutate({ exePath })}
@@ -294,18 +373,18 @@ export default function GameDetail() {
 
       {/* Right panel */}
       <div className="flex-1 flex flex-col overflow-hidden">
-        <div className="flex-shrink-0 border-b border-[var(--gt-overlay)]">
+        <div className="flex-shrink-0" style={{ borderBottom: "1px solid rgba(255,255,255,0.07)" }}>
           <div className="flex items-center gap-3 px-6 pt-4 pb-0">
             <button
               onClick={() => navigate(-1)}
-              className="text-[var(--gt-muted)] hover:text-[var(--gt-text)] transition-colors"
+              className="text-white/40 hover:text-white transition-colors"
             >
               <ArrowLeft size={18} />
             </button>
             <div className="flex-1">
-              <h1 className="text-lg font-bold text-[var(--gt-text)]">{game.name}</h1>
-              <p className="text-xs text-[var(--gt-muted)]">
-                {isHidden ? "👁 Hidden" : game.status === "deleted" ? "🗑 Removed" : "✓ Installed"}
+              <h1 className="text-lg font-bold text-white">{game.name}</h1>
+              <p className="text-xs text-white/40">
+                {isHidden ? "Hidden" : game.status === "deleted" ? "Removed" : "Installed"}
               </p>
             </div>
           </div>
@@ -316,8 +395,8 @@ export default function GameDetail() {
                 onClick={() => setActiveTab(t)}
                 className={`px-4 py-2 text-sm capitalize border-b-2 transition-colors ${
                   activeTab === t
-                    ? "border-[var(--gt-accent)] text-[var(--gt-accent)]"
-                    : "border-transparent text-[var(--gt-muted)] hover:text-[var(--gt-sub)]"
+                    ? "border-white text-white"
+                    : "border-transparent text-white/40 hover:text-white/60"
                 }`}
               >
                 {t}
@@ -332,18 +411,18 @@ export default function GameDetail() {
             <>
               {stats && (stats.currentStreak > 0 || stats.longestStreak > 0) && (
                 <div className="flex gap-3">
-                  <div className="flex-1 flex items-center gap-3 bg-[var(--gt-surface)] border border-[var(--gt-overlay)] rounded-lg px-4 py-3">
+                  <div className="flex-1 flex items-center gap-3 rounded-xl px-4 py-3" style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,160,50,0.15)" }}>
                     <span className="text-2xl">🔥</span>
                     <div>
-                      <p className="text-xl font-bold text-[var(--gt-orange)]">{stats.currentStreak}d</p>
-                      <p className="text-[10px] text-[var(--gt-muted)]">Current Streak</p>
+                      <p className="text-xl font-bold text-orange-400">{stats.currentStreak}d</p>
+                      <p className="text-[10px] text-white/40">Current Streak</p>
                     </div>
                   </div>
-                  <div className="flex-1 flex items-center gap-3 bg-[var(--gt-surface)] border border-[var(--gt-overlay)] rounded-lg px-4 py-3">
+                  <div className="flex-1 flex items-center gap-3 rounded-xl px-4 py-3" style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(250,204,21,0.15)" }}>
                     <span className="text-2xl">🏆</span>
                     <div>
-                      <p className="text-xl font-bold text-[var(--gt-yellow)]">{stats.longestStreak}d</p>
-                      <p className="text-[10px] text-[var(--gt-muted)]">Longest Streak</p>
+                      <p className="text-xl font-bold text-yellow-400">{stats.longestStreak}d</p>
+                      <p className="text-[10px] text-white/40">Longest Streak</p>
                     </div>
                   </div>
                 </div>
@@ -374,22 +453,22 @@ export default function GameDetail() {
                 saving={setGoalMutation.isPending}
               />
 
-              <section className="bg-[var(--gt-surface)] rounded-lg border border-[var(--gt-overlay)] p-4">
+              <section className="rounded-2xl p-4" style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.07)" }}>
                 <div className="flex items-center justify-between mb-4">
-                  <h3 className="text-xs font-semibold text-[var(--gt-sub)] uppercase tracking-wider flex items-center gap-2">
+                  <h3 className="text-xs font-semibold text-white/40 uppercase tracking-wider flex items-center gap-2">
                     <Calendar size={13} /> Activity Heatmap
                   </h3>
                   <div className="flex items-center gap-1">
                     <button
                       onClick={() => setHeatmapYear((y) => y - 1)}
-                      className="text-[var(--gt-muted)] hover:text-[var(--gt-text)] px-1 text-sm"
+                      className="text-white/40 hover:text-white px-1 text-sm"
                     >
                       ‹
                     </button>
-                    <span className="text-xs text-[var(--gt-sub)] w-10 text-center">{heatmapYear}</span>
+                    <span className="text-xs text-white/55 w-10 text-center">{heatmapYear}</span>
                     <button
                       onClick={() => setHeatmapYear((y) => Math.min(y + 1, CURRENT_YEAR))}
-                      className="text-[var(--gt-muted)] hover:text-[var(--gt-text)] px-1 text-sm"
+                      className="text-white/40 hover:text-white px-1 text-sm"
                     >
                       ›
                     </button>
@@ -399,23 +478,23 @@ export default function GameDetail() {
               </section>
 
               {monthlyData.length > 0 && (
-                <section className="bg-[var(--gt-surface)] rounded-lg border border-[var(--gt-overlay)] p-4">
-                  <h3 className="text-xs font-semibold text-[var(--gt-sub)] uppercase tracking-wider mb-4">
+                <section className="rounded-2xl p-4" style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.07)" }}>
+                  <h3 className="text-xs font-semibold text-white/40 uppercase tracking-wider mb-4">
                     Monthly Playtime
                   </h3>
                   <ResponsiveContainer width="100%" height={160}>
                     <BarChart data={monthlyData} margin={{ top: 0, right: 0, bottom: 0, left: 0 }}>
-                      <XAxis dataKey="month" tick={{ fill: "var(--gt-muted)", fontSize: 10 }} tickLine={false} axisLine={false} />
-                      <YAxis tick={{ fill: "var(--gt-muted)", fontSize: 10 }} tickLine={false} axisLine={false} tickFormatter={(v) => `${v}h`} />
+                      <XAxis dataKey="month" tick={{ fill: "rgba(255,255,255,0.35)", fontSize: 10 }} tickLine={false} axisLine={false} />
+                      <YAxis tick={{ fill: "rgba(255,255,255,0.35)", fontSize: 10 }} tickLine={false} axisLine={false} tickFormatter={(v) => `${v}h`} />
                       <Tooltip
                         formatter={(v) => [`${Number(v).toFixed(1)}h`, "Playtime"]}
-                        contentStyle={{ background: "var(--gt-surface)", border: "1px solid var(--gt-overlay)", borderRadius: 6, fontSize: 11 }}
-                        labelStyle={{ color: "var(--gt-sub)" }}
-                        itemStyle={{ color: "var(--gt-blue)" }}
+                        contentStyle={{ background: "rgba(15,15,20,0.95)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 8, fontSize: 11 }}
+                        labelStyle={{ color: "rgba(255,255,255,0.6)" }}
+                        itemStyle={{ color: "#60a5fa" }}
                       />
                       <Bar dataKey="hours" radius={[3, 3, 0, 0]}>
                         {monthlyData.map((_, i) => (
-                          <Cell key={i} fill="var(--gt-blue)" opacity={0.8} />
+                          <Cell key={i} fill="#60a5fa" opacity={0.8} />
                         ))}
                       </Bar>
                     </BarChart>
@@ -423,8 +502,91 @@ export default function GameDetail() {
                 </section>
               )}
 
+              {/* Collections */}
               <section>
-                <h3 className="text-xs font-semibold text-[var(--gt-sub)] uppercase tracking-wider mb-3">Notes</h3>
+                <div className="flex items-center justify-between mb-3">
+                  <h3 className="text-xs font-semibold text-white/55 uppercase tracking-wider">
+                    Collections
+                  </h3>
+                  <div className="relative">
+                    <button
+                      onClick={() => setShowCollectionPicker((v) => !v)}
+                      className="flex items-center gap-1 text-xs text-white/40 hover:text-white transition-colors"
+                    >
+                      <Plus size={12} />
+                      Add
+                    </button>
+                    {showCollectionPicker && (
+                      <>
+                        <div
+                          className="fixed inset-0 z-10"
+                          onClick={() => setShowCollectionPicker(false)}
+                        />
+                      <div className="absolute right-0 top-full mt-1 w-52 rounded-xl shadow-2xl z-20 py-1" style={{ background: "rgba(15,15,20,0.97)", border: "1px solid rgba(255,255,255,0.1)" }}>
+                        {allCollections.length === 0 && (
+                          <p className="px-3 py-2 text-xs text-white/40">No collections yet</p>
+                        )}
+                        {allCollections.map((col) => {
+                          const inCol = gameCollections.some((c) => c.id === col.id);
+                          return (
+                            <button
+                              key={col.id}
+                              onClick={() => {
+                                if (inCol) {
+                                  removeFromCollectionMutation.mutate(col.id);
+                                } else {
+                                  addToCollectionMutation.mutate(col.id);
+                                }
+                              }}
+                              className="w-full flex items-center gap-2.5 px-3 py-2 hover:bg-white/6 transition-colors text-left"
+                            >
+                              <span style={{ color: col.color }}>
+                                <CollectionIcon iconKey={col.icon} size={13} />
+                              </span>
+                              <span className="flex-1 text-xs text-white truncate">{col.name}</span>
+                              {inCol && <Check size={11} className="text-white flex-shrink-0" />}
+                            </button>
+                          );
+                        })}
+                        <div className="mt-1 pt-1" style={{ borderTop: "1px solid rgba(255,255,255,0.07)" }}>
+                          <button
+                            onClick={() => { setShowCollectionPicker(false); navigate("/collections"); }}
+                            className="w-full px-3 py-1.5 text-xs text-white/40 hover:text-white text-left transition-colors"
+                          >
+                            Manage collections…
+                          </button>
+                        </div>
+                      </div>
+                      </>
+                    )}
+                  </div>
+                </div>
+
+                {gameCollections.length === 0 ? (
+                  <p className="text-xs text-white/40 italic">Not in any collection</p>
+                ) : (
+                  <div className="flex flex-wrap gap-2">
+                    {gameCollections.map((col) => (
+                      <button
+                        key={col.id}
+                        onClick={() => navigate(`/collections/${col.id}`)}
+                        className="group flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs border transition-colors hover:opacity-90"
+                        style={{
+                          background: col.color + "22",
+                          borderColor: col.color + "55",
+                          color: col.color,
+                        }}
+                      >
+                        <CollectionIcon iconKey={col.icon} size={11} />
+                        {col.name}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </section>
+
+              <section>
+                <h3 className="text-xs font-semibold text-white/55 uppercase tracking-wider mb-3">Notes</h3>
                 <textarea
                   value={notes}
                   onChange={(e) => setNotesValue(e.target.value)}
@@ -435,7 +597,8 @@ export default function GameDetail() {
                   }}
                   placeholder="Add notes, tips, progress…"
                   rows={4}
-                  className="w-full bg-[var(--gt-surface)] border border-[var(--gt-overlay)] rounded-lg px-3 py-2 text-sm text-[var(--gt-text)] placeholder-[var(--gt-muted)] focus:outline-none focus:border-[var(--gt-accent)] resize-none"
+                  className="w-full rounded-xl px-3 py-2 text-sm text-white placeholder-white/30 focus:outline-none resize-none"
+                  style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)" }}
                 />
               </section>
 
@@ -444,58 +607,200 @@ export default function GameDetail() {
 
           {activeTab === "sessions" && (
             <section>
-              <h3 className="text-xs font-semibold text-[var(--gt-sub)] uppercase tracking-wider mb-3">
+              <h3 className="text-xs font-semibold text-white/55 uppercase tracking-wider mb-3">
                 All Sessions ({sessions?.length ?? 0})
               </h3>
               {sessions?.length === 0 && (
-                <p className="text-sm text-[var(--gt-muted)]">No sessions recorded.</p>
+                <p className="text-sm text-white/40">No sessions recorded.</p>
               )}
               <div className="space-y-1">
-                {sessions?.map((s) => (
-                  <div key={s.id} className="flex items-center gap-4 px-4 py-3 rounded-lg bg-[var(--gt-surface)] border border-[var(--gt-overlay)] text-sm group">
-                    <span className="flex-1 text-xs text-[var(--gt-sub)]">
-                      {new Date(s.startedAt).toLocaleString(undefined, { month: "short", day: "numeric", year: "numeric", hour: "2-digit", minute: "2-digit" })}
-                      {s.endedAt
-                        ? ` → ${new Date(s.endedAt).toLocaleString(undefined, { month: "short", day: "numeric", year: "numeric", hour: "2-digit", minute: "2-digit" })}`
-                        : <span className="text-[var(--gt-accent)]"> — Active</span>}
-                    </span>
-                    <span className="text-[var(--gt-text)] font-medium text-sm flex-shrink-0">
-                      {s.durationSecs ? formatDuration(s.durationSecs) : "—"}
-                    </span>
-                    {confirmDeleteSessionId === s.id ? (
-                      <div className="flex items-center gap-1">
-                        <button
-                          onClick={() => deleteSessionMutation.mutate(s.id)}
-                          disabled={deleteSessionMutation.isPending}
-                          className="px-2 py-1 rounded text-xs bg-[var(--gt-red)] text-white cursor-pointer hover:bg-[var(--gt-red)]/80 transition-colors"
-                        >
-                          Confirm
-                        </button>
-                        <button
-                          onClick={() => setConfirmDeleteSessionId(null)}
-                          className="px-2 py-1 rounded text-xs border border-[var(--gt-overlay)] text-[var(--gt-sub)] cursor-pointer hover:text-[var(--gt-text)] transition-colors"
-                        >
-                          Cancel
-                        </button>
-                      </div>
-                    ) : (
-                      <button
-                        onClick={() => setConfirmDeleteSessionId(s.id)}
-                        className="opacity-0 group-hover:opacity-100 p-1 rounded text-[var(--gt-muted)] hover:text-[var(--gt-red)] hover:bg-[var(--gt-red)]/10 cursor-pointer transition-all"
-                        title="Delete session"
-                      >
-                        <Trash2 size={14} />
-                      </button>
-                    )}
-                  </div>
-                ))}
+                {sessions?.map((s) => {
+                  const isCompleted = !!s.endedAt && !!s.durationSecs;
+                  const isEditing = editSessionId === s.id;
+                  const isConfirmingDelete = confirmDeleteSessionId === s.id;
+
+                  const previewDuration = isEditing && editStart && editEnd
+                    ? (() => {
+                        const ms = new Date(editEnd).getTime() - new Date(editStart).getTime();
+                        return ms > 0 ? formatDuration(Math.round(ms / 1000)) : null;
+                      })()
+                    : null;
+
+                  return (
+                    <div
+                      key={s.id}
+                      className="rounded-xl text-sm group"
+                      style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.07)" }}
+                    >
+                      {isEditing ? (
+                        <div className="p-3 space-y-2">
+                          <div className="grid grid-cols-2 gap-2">
+                            <div>
+                              <label className="text-[10px] text-white/40 block mb-1">Start</label>
+                              <input
+                                type="datetime-local"
+                                value={editStart}
+                                onChange={(e) => setEditStart(e.target.value)}
+                                className="w-full rounded px-2 py-1 text-xs text-white focus:outline-none"
+                                style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)" }}
+                              />
+                            </div>
+                            <div>
+                              <label className="text-[10px] text-white/40 block mb-1">End</label>
+                              <input
+                                type="datetime-local"
+                                value={editEnd}
+                                onChange={(e) => setEditEnd(e.target.value)}
+                                className="w-full rounded px-2 py-1 text-xs text-white focus:outline-none"
+                                style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)" }}
+                              />
+                            </div>
+                          </div>
+                          <div className="flex items-center justify-between pt-1">
+                            <span className="text-xs text-white/40">
+                              {previewDuration ?? (editStart && editEnd ? "Invalid range" : "—")}
+                            </span>
+                            <div className="flex gap-1">
+                              <button
+                                onClick={() => {
+                                  const startIso = new Date(editStart).toISOString();
+                                  const endIso   = new Date(editEnd).toISOString();
+                                  updateSessionMutation.mutate({ sessionId: s.id, startedAt: startIso, endedAt: endIso });
+                                }}
+                                disabled={updateSessionMutation.isPending || !previewDuration}
+                                className="px-3 py-1 rounded text-xs bg-white text-black font-medium disabled:opacity-50 transition-colors"
+                              >
+                                {updateSessionMutation.isPending ? "Saving…" : "Save"}
+                              </button>
+                              <button
+                                onClick={() => setEditSessionId(null)}
+                                className="px-3 py-1 rounded text-xs border border-white/10 text-white/50 hover:text-white transition-colors"
+                              >
+                                Cancel
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      ) : (
+                        <div>
+                          <div className="flex items-center gap-4 px-4 py-3">
+                            <span className="flex-1 text-xs text-white/55">
+                              {new Date(s.startedAt).toLocaleString(undefined, { month: "short", day: "numeric", year: "numeric", hour: "2-digit", minute: "2-digit" })}
+                              {s.endedAt
+                                ? ` → ${new Date(s.endedAt).toLocaleString(undefined, { month: "short", day: "numeric", year: "numeric", hour: "2-digit", minute: "2-digit" })}`
+                                : <span className="text-blue-400"> — Active</span>}
+                            </span>
+                            <span className="text-white font-medium text-sm flex-shrink-0">
+                              {s.durationSecs ? formatDuration(s.durationSecs) : "—"}
+                            </span>
+                            {isConfirmingDelete ? (
+                              <div className="flex items-center gap-1">
+                                <button
+                                  onClick={() => deleteSessionMutation.mutate(s.id)}
+                                  disabled={deleteSessionMutation.isPending}
+                                  className="px-2 py-1 rounded text-xs bg-red-500 text-white cursor-pointer hover:bg-red-500/80 transition-colors"
+                                >
+                                  Confirm
+                                </button>
+                                <button
+                                  onClick={() => setConfirmDeleteSessionId(null)}
+                                  className="px-2 py-1 rounded text-xs border border-white/10 text-white/50 cursor-pointer hover:text-white transition-colors"
+                                >
+                                  Cancel
+                                </button>
+                              </div>
+                            ) : (
+                              <div className="flex items-center gap-0.5">
+                                <button
+                                  onClick={() => {
+                                    setConfirmDeleteSessionId(null);
+                                    setEditSessionId(null);
+                                    if (noteSessionId === s.id) {
+                                      setNoteSessionId(null);
+                                    } else {
+                                      setNoteValue(s.notes ?? "");
+                                      setNoteSessionId(s.id);
+                                    }
+                                  }}
+                                  className={`p-1 rounded cursor-pointer transition-colors hover:text-white hover:bg-white/10 ${
+                                    s.notes
+                                      ? "text-white/70"
+                                      : "text-white/40 opacity-0 group-hover:opacity-100"
+                                  }`}
+                                  title={s.notes ? "Edit note" : "Add note"}
+                                >
+                                  <MessageSquare size={14} />
+                                </button>
+                                {isCompleted && (
+                                  <button
+                                    onClick={() => {
+                                      setConfirmDeleteSessionId(null);
+                                      setNoteSessionId(null);
+                                      setEditStart(toDatetimeLocal(s.startedAt));
+                                      setEditEnd(toDatetimeLocal(s.endedAt!));
+                                      setEditSessionId(s.id);
+                                    }}
+                                    className="p-1 rounded text-white/40 hover:text-white hover:bg-white/10 cursor-pointer transition-colors opacity-0 group-hover:opacity-100"
+                                    title="Edit session times"
+                                  >
+                                    <Pencil size={14} />
+                                  </button>
+                                )}
+                                <button
+                                  onClick={() => setConfirmDeleteSessionId(s.id)}
+                                  className="p-1 rounded text-white/40 hover:text-red-400 hover:bg-red-500/10 cursor-pointer transition-colors opacity-0 group-hover:opacity-100"
+                                  title="Delete session"
+                                >
+                                  <Trash2 size={14} />
+                                </button>
+                              </div>
+                            )}
+                          </div>
+                          {s.notes && noteSessionId !== s.id && (
+                            <p className="px-4 pb-2 text-xs text-white/40 italic line-clamp-2">
+                              {s.notes}
+                            </p>
+                          )}
+                          {noteSessionId === s.id && (
+                            <div className="px-4 pb-3 space-y-2">
+                              <textarea
+                                autoFocus
+                                value={noteValue}
+                                onChange={(e) => setNoteValue(e.target.value)}
+                                placeholder="What happened this session? Where did you leave off?"
+                                rows={2}
+                                className="w-full rounded px-2 py-1.5 text-xs text-white placeholder-white/30 focus:outline-none resize-none"
+                                style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)" }}
+                              />
+                              <div className="flex gap-1 justify-end">
+                                <button
+                                  onClick={() => updateSessionNotesMutation.mutate({ sessionId: s.id, notes: noteValue })}
+                                  disabled={updateSessionNotesMutation.isPending}
+                                  className="px-3 py-1 rounded text-xs bg-white text-black font-medium disabled:opacity-50 transition-colors"
+                                >
+                                  {updateSessionNotesMutation.isPending ? "Saving…" : "Save"}
+                                </button>
+                                <button
+                                  onClick={() => setNoteSessionId(null)}
+                                  className="px-3 py-1 rounded text-xs border border-white/10 text-white/50 hover:text-white transition-colors"
+                                >
+                                  Cancel
+                                </button>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
               </div>
             </section>
           )}
 
           {activeTab === "history" && (
             <section>
-              <h3 className="text-xs font-semibold text-[var(--gt-sub)] uppercase tracking-wider mb-3">Daily Breakdown</h3>
+              <h3 className="text-xs font-semibold text-white/55 uppercase tracking-wider mb-3">Daily Breakdown</h3>
               <DailyBreakdown
                 sessions={sessions ?? []}
                 confirmDeleteSessionId={confirmDeleteSessionId}
@@ -515,14 +820,14 @@ export default function GameDetail() {
               <div className="space-y-6">
                 {/* Unlocked */}
                 <section>
-                  <h3 className="text-xs font-semibold text-[var(--gt-sub)] uppercase tracking-wider mb-3">
+                  <h3 className="text-xs font-semibold text-white/55 uppercase tracking-wider mb-3">
                     Unlocked
-                    <span className="ml-2 font-normal normal-case text-[var(--gt-muted)]">
+                    <span className="ml-2 font-normal normal-case text-white/40">
                       {unlocked.length} / {PER_GAME_BADGES.length}
                     </span>
                   </h3>
                   {unlocked.length === 0 ? (
-                    <p className="text-sm text-[var(--gt-muted)]">No achievements earned yet — keep playing!</p>
+                    <p className="text-sm text-white/40">No achievements earned yet — keep playing!</p>
                   ) : (
                     <div className="grid grid-cols-2 gap-2">
                       {unlocked.map((a) => (
@@ -535,20 +840,20 @@ export default function GameDetail() {
                 {/* Locked */}
                 {locked.length > 0 && (
                   <section>
-                    <h3 className="text-xs font-semibold text-[var(--gt-sub)] uppercase tracking-wider mb-3">Locked</h3>
+                    <h3 className="text-xs font-semibold text-white/55 uppercase tracking-wider mb-3">Locked</h3>
                     <div className="grid grid-cols-2 gap-2">
                       {locked.map((b) => (
                         <div
                           key={b.key}
-                          className="flex items-center gap-3 p-3 rounded-lg border border-[var(--gt-overlay)] opacity-50"
-                          style={{ background: "var(--gt-surface)", filter: "grayscale(1)" }}
+                          className="flex items-center gap-3 p-3 rounded-xl opacity-40"
+                          style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.07)", filter: "grayscale(1)" }}
                         >
-                          <div className="w-10 h-10 flex items-center justify-center rounded-full bg-[var(--gt-overlay)] text-xl flex-shrink-0">
+                          <div className="w-10 h-10 flex items-center justify-center rounded-full text-xl flex-shrink-0" style={{ background: "rgba(255,255,255,0.08)" }}>
                             {b.icon}
                           </div>
                           <div className="min-w-0">
-                            <p className="text-sm font-medium text-[var(--gt-text)]">{b.label}</p>
-                            <p className="text-xs text-[var(--gt-muted)]">{b.description}</p>
+                            <p className="text-sm font-medium text-white">{b.label}</p>
+                            <p className="text-xs text-white/40">{b.description}</p>
                           </div>
                         </div>
                       ))}
@@ -564,24 +869,24 @@ export default function GameDetail() {
       {/* Cover image editor modal */}
       {showCoverEditor && (
         <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50" onClick={() => setShowCoverEditor(false)}>
-          <div className="bg-[var(--gt-base)] border border-[var(--gt-overlay)] rounded-xl p-5 w-96 shadow-2xl" onClick={(e) => e.stopPropagation()}>
+          <div className="rounded-2xl p-5 w-96 shadow-2xl" style={{ background: "rgba(15,15,20,0.98)", border: "1px solid rgba(255,255,255,0.1)" }} onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between mb-3">
-              <h2 className="text-sm font-semibold text-[var(--gt-text)]">Change Cover Image</h2>
-              <button onClick={() => setShowCoverEditor(false)} className="text-[var(--gt-muted)] hover:text-[var(--gt-text)]">
+              <h2 className="text-sm font-semibold text-white">Change Cover Image</h2>
+              <button onClick={() => setShowCoverEditor(false)} className="text-white/40 hover:text-white">
                 <X size={16} />
               </button>
             </div>
 
             {/* Tabs */}
-            <div className="flex gap-0 border-b border-[var(--gt-overlay)] mb-4">
+            <div className="flex gap-0 mb-4" style={{ borderBottom: "1px solid rgba(255,255,255,0.07)" }}>
               {(["url", "search"] as const).map((tab) => (
                 <button
                   key={tab}
                   onClick={() => setCoverTab(tab)}
                   className={`px-4 py-1.5 text-xs capitalize border-b-2 transition-colors -mb-px ${
                     coverTab === tab
-                      ? "border-[var(--gt-accent)] text-[var(--gt-accent)]"
-                      : "border-transparent text-[var(--gt-muted)] hover:text-[var(--gt-sub)]"
+                      ? "border-white text-white"
+                      : "border-transparent text-white/40 hover:text-white/60"
                   }`}
                 >
                   {tab === "url" ? "URL / File" : "Search SteamGridDB"}
@@ -591,7 +896,7 @@ export default function GameDetail() {
 
             {coverTab === "url" && (
               <>
-                <div className="w-24 h-36 mx-auto mb-4 rounded overflow-hidden bg-[var(--gt-overlay)]">
+                <div className="w-24 h-36 mx-auto mb-4 rounded-lg overflow-hidden" style={{ background: "rgba(255,255,255,0.06)" }}>
                   <img
                     src={coverUrlInput || game.coverUrl || PLACEHOLDER}
                     alt=""
@@ -600,36 +905,38 @@ export default function GameDetail() {
                   />
                 </div>
 
-                <label className="text-xs text-[var(--gt-sub)] mb-1 block">Image URL</label>
+                <label className="text-xs text-white/55 mb-1 block">Image URL</label>
                 <div className="flex gap-2 mb-3">
                   <div className="relative flex-1">
-                    <Link size={12} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[var(--gt-muted)]" />
+                    <Link size={12} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-white/40" />
                     <input
                       type="text"
                       value={coverUrlInput}
                       onChange={(e) => setCoverUrlInput(e.target.value)}
                       placeholder="https://…"
-                      className="w-full bg-[var(--gt-surface)] border border-[var(--gt-overlay)] rounded-md pl-7 pr-3 py-1.5 text-xs text-[var(--gt-text)] placeholder-[var(--gt-muted)] focus:outline-none focus:border-[var(--gt-accent)]"
+                      className="w-full rounded-md pl-7 pr-3 py-1.5 text-xs text-white placeholder-white/30 focus:outline-none"
+                      style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)" }}
                     />
                   </div>
                   <button
                     onClick={() => saveCoverUrl(coverUrlInput)}
-                    className="px-3 py-1.5 rounded-md bg-[var(--gt-accent)] text-[var(--gt-base)] text-xs font-medium hover:bg-[var(--gt-accent-dim)] transition-colors"
+                    className="px-3 py-1.5 rounded-md bg-white text-black text-xs font-medium transition-colors hover:bg-white/90"
                   >
                     Set
                   </button>
                 </div>
 
-                <div className="flex items-center gap-2 text-[var(--gt-hover)] text-xs mb-3">
-                  <div className="flex-1 h-px bg-[var(--gt-overlay)]" />
+                <div className="flex items-center gap-2 text-white/30 text-xs mb-3">
+                  <div className="flex-1 h-px" style={{ background: "rgba(255,255,255,0.08)" }} />
                   <span>or</span>
-                  <div className="flex-1 h-px bg-[var(--gt-overlay)]" />
+                  <div className="flex-1 h-px" style={{ background: "rgba(255,255,255,0.08)" }} />
                 </div>
 
                 <input ref={fileInputRef} type="file" accept="image/*" className="hidden" onChange={handleFileChange} />
                 <button
                   onClick={() => fileInputRef.current?.click()}
-                  className="w-full flex items-center justify-center gap-2 py-2 rounded-md border border-[var(--gt-overlay)] text-xs text-[var(--gt-sub)] hover:text-[var(--gt-text)] hover:border-[var(--gt-hover)] transition-colors"
+                  className="w-full flex items-center justify-center gap-2 py-2 rounded-md text-xs text-white/50 hover:text-white transition-colors"
+                  style={{ border: "1px solid rgba(255,255,255,0.1)" }}
                 >
                   <Upload size={13} />
                   Upload from file
@@ -638,7 +945,7 @@ export default function GameDetail() {
                 {game.coverUrl && (
                   <button
                     onClick={() => saveCoverUrl("")}
-                    className="w-full mt-2 py-1.5 text-xs text-[var(--gt-red)]/70 hover:text-[var(--gt-red)] transition-colors"
+                    className="w-full mt-2 py-1.5 text-xs text-red-400/70 hover:text-red-400 transition-colors"
                   >
                     Remove cover
                   </button>
@@ -654,7 +961,8 @@ export default function GameDetail() {
                     defaultValue={game.name}
                     id="cover-search-input"
                     placeholder="Game name…"
-                    className="flex-1 bg-[var(--gt-surface)] border border-[var(--gt-overlay)] rounded-md px-3 py-1.5 text-xs text-[var(--gt-text)] placeholder-[var(--gt-muted)] focus:outline-none focus:border-[var(--gt-accent)]"
+                    className="flex-1 rounded-md px-3 py-1.5 text-xs text-white placeholder-white/30 focus:outline-none"
+                    style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)" }}
                     onKeyDown={(e) => e.key === "Enter" && (e.target as HTMLInputElement).blur()}
                   />
                   <button
@@ -674,15 +982,15 @@ export default function GameDetail() {
                         setCoverSearching(false);
                       }
                     }}
-                    className="px-3 py-1.5 rounded-md bg-[var(--gt-accent)] text-[var(--gt-base)] text-xs font-medium hover:bg-[var(--gt-accent-dim)] disabled:opacity-50 transition-colors"
+                    className="px-3 py-1.5 rounded-md bg-white text-black text-xs font-medium disabled:opacity-50 transition-colors"
                   >
                     {coverSearching ? "…" : "Search"}
                   </button>
                 </div>
 
                 {coverSearchResults.length === 0 && !coverSearching && (
-                  <p className="text-xs text-[var(--gt-muted)] text-center py-6">
-                    {coverSearchResults.length === 0 ? "Search to see covers" : "No results found"}
+                  <p className="text-xs text-white/40 text-center py-6">
+                    Search to see covers
                   </p>
                 )}
 
@@ -691,7 +999,7 @@ export default function GameDetail() {
                     <button
                       key={url}
                       onClick={() => saveCoverUrl(url)}
-                      className="rounded overflow-hidden border-2 border-transparent hover:border-[var(--gt-accent)] transition-colors"
+                      className="rounded-lg overflow-hidden border-2 border-transparent hover:border-white transition-colors"
                     >
                       <img
                         src={url}
@@ -703,7 +1011,7 @@ export default function GameDetail() {
                   ))}
                 </div>
 
-                <p className="text-[10px] text-[var(--gt-muted)] mt-2 text-center">
+                <p className="text-[10px] text-white/30 mt-2 text-center">
                   Requires a SteamGridDB API key in Settings
                 </p>
               </>
@@ -734,7 +1042,8 @@ function EditableName({ name, onSave }: { name: string; onSave: (name: string) =
         onChange={(e) => setValue(e.target.value)}
         onBlur={commit}
         onKeyDown={(e) => { if (e.key === "Enter") commit(); if (e.key === "Escape") { setValue(name); setEditing(false); } }}
-        className="w-full text-sm font-bold bg-[var(--gt-surface)] border border-[var(--gt-accent)] rounded px-2 py-1 text-[var(--gt-text)] focus:outline-none"
+        className="w-full text-sm font-bold rounded px-2 py-1 text-white focus:outline-none"
+        style={{ background: "rgba(255,255,255,0.08)", border: "1px solid rgba(255,255,255,0.2)" }}
       />
     );
   }
@@ -745,8 +1054,8 @@ function EditableName({ name, onSave }: { name: string; onSave: (name: string) =
       onClick={() => { setValue(name); setEditing(true); }}
       title="Click to rename"
     >
-      <h2 className="text-sm font-bold text-[var(--gt-text)]">{name}</h2>
-      <Pencil size={11} className="text-[var(--gt-muted)] opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0" />
+      <h2 className="text-sm font-bold text-white">{name}</h2>
+      <Pencil size={11} className="text-white/40 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0" />
     </div>
   );
 }
@@ -784,12 +1093,13 @@ function ExePathEditor({ exePath, onSave }: { exePath: string; onSave: (path: st
           onChange={(e) => setValue(e.target.value)}
           onBlur={commit}
           onKeyDown={(e) => { if (e.key === "Enter") commit(); if (e.key === "Escape") { setValue(exePath); setEditing(false); } }}
-          className="flex-1 min-w-0 text-[10px] bg-[var(--gt-surface)] border border-[var(--gt-accent)] rounded px-2 py-1 text-[var(--gt-text)] focus:outline-none"
+          className="flex-1 min-w-0 text-[10px] rounded px-2 py-1 text-white focus:outline-none"
+          style={{ background: "rgba(255,255,255,0.08)", border: "1px solid rgba(255,255,255,0.2)" }}
           placeholder="C:\Games\game.exe"
         />
         <button
           onMouseDown={(e) => { e.preventDefault(); browse(); }}
-          className="flex-shrink-0 px-2 py-1 rounded border border-[var(--gt-overlay)] text-[var(--gt-muted)] hover:text-[var(--gt-text)] hover:border-[var(--gt-accent)] cursor-pointer transition-colors"
+          className="flex-shrink-0 px-2 py-1 rounded border border-white/10 text-white/40 hover:text-white cursor-pointer transition-colors"
           title="Browse"
         >
           <FolderOpen size={12} />
@@ -804,10 +1114,10 @@ function ExePathEditor({ exePath, onSave }: { exePath: string; onSave: (path: st
       onClick={() => { setValue(exePath); setEditing(true); }}
       title="Click to edit path"
     >
-      <p className="text-[10px] text-[var(--gt-sub)] truncate flex-1">
-        {exePath || <span className="text-[var(--gt-muted)] italic">Not set — click to add</span>}
+      <p className="text-[10px] text-white/55 truncate flex-1">
+        {exePath || <span className="text-white/30 italic">Not set — click to add</span>}
       </p>
-      <Pencil size={10} className="flex-shrink-0 text-[var(--gt-muted)] opacity-0 group-hover:opacity-100 transition-opacity" />
+      <Pencil size={10} className="flex-shrink-0 text-white/40 opacity-0 group-hover:opacity-100 transition-opacity" />
     </div>
   );
 }
@@ -815,8 +1125,8 @@ function ExePathEditor({ exePath, onSave }: { exePath: string; onSave: (path: st
 function Stat({ label, value }: { label: string; value: string }) {
   return (
     <div>
-      <p className="text-[10px] text-[var(--gt-muted)]">{label}</p>
-      <p className="text-xs font-medium text-[var(--gt-text)]">{value}</p>
+      <p className="text-[10px] text-white/40">{label}</p>
+      <p className="text-xs font-medium text-white">{value}</p>
     </div>
   );
 }
@@ -859,15 +1169,15 @@ function GoalsSection({
   const canAddMore = setPeriods.size < 3;
 
   return (
-    <section className="bg-[var(--gt-surface)] rounded-lg border border-[var(--gt-overlay)] p-4">
+    <section className="rounded-2xl p-4" style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.07)" }}>
       <div className="flex items-center justify-between mb-3">
-        <h3 className="text-xs font-semibold text-[var(--gt-sub)] uppercase tracking-wider flex items-center gap-2">
+        <h3 className="text-xs font-semibold text-white/55 uppercase tracking-wider flex items-center gap-2">
           <Target size={13} /> Playtime Goals
         </h3>
         {canAddMore && !showForm && (
           <button
             onClick={onOpenForm}
-            className="flex items-center gap-1 text-xs text-[var(--gt-accent)] hover:text-[var(--gt-accent-dim)] transition-colors"
+            className="flex items-center gap-1 text-xs text-white/40 hover:text-white transition-colors"
           >
             <Plus size={13} /> Add Goal
           </button>
@@ -875,7 +1185,7 @@ function GoalsSection({
       </div>
 
       {goals.length === 0 && !showForm && (
-        <p className="text-xs text-[var(--gt-muted)]">
+        <p className="text-xs text-white/40">
           No goals set. Add one to track your progress.
         </p>
       )}
@@ -892,33 +1202,33 @@ function GoalsSection({
           return (
             <div key={g.period} className="group">
               <div className="flex items-center justify-between mb-1">
-                <span className="text-xs font-medium text-[var(--gt-text)]">
+                <span className="text-xs font-medium text-white">
                   {PERIOD_LABELS[g.period as GoalPeriod]}
                 </span>
                 <div className="flex items-center gap-2">
-                  <span className={`text-xs font-medium ${done ? "text-[var(--gt-green)]" : "text-[var(--gt-sub)]"}`}>
+                  <span className={`text-xs font-medium ${done ? "text-green-400" : "text-white/55"}`}>
                     {done ? "✓ " : ""}{currentH}h / {targetH}h
                   </span>
                   <button
                     onClick={() => onDelete(g.period as GoalPeriod)}
-                    className="opacity-0 group-hover:opacity-100 p-0.5 rounded text-[var(--gt-muted)] hover:text-[var(--gt-red)] transition-all"
+                    className="opacity-0 group-hover:opacity-100 p-0.5 rounded text-white/40 hover:text-red-400 transition-all"
                     title="Remove goal"
                   >
                     <X size={12} />
                   </button>
                 </div>
               </div>
-              <div className="h-2 bg-[var(--gt-overlay)] rounded-full overflow-hidden">
+              <div className="h-2 rounded-full overflow-hidden" style={{ background: "rgba(255,255,255,0.08)" }}>
                 <div
                   className="h-full rounded-full transition-all duration-500"
                   style={{
                     width: `${pct}%`,
-                    background: done ? "var(--gt-green)" : "var(--gt-accent)",
+                    background: done ? "#4ade80" : "rgba(255,255,255,0.7)",
                   }}
                 />
               </div>
               {done && (
-                <p className="text-[10px] text-[var(--gt-green)] mt-0.5">Goal reached!</p>
+                <p className="text-[10px] text-green-400 mt-0.5">Goal reached!</p>
               )}
             </div>
           );
@@ -926,14 +1236,15 @@ function GoalsSection({
       </div>
 
       {showForm && (
-        <div className="mt-3 pt-3 border-t border-[var(--gt-overlay)]">
+        <div className="mt-3 pt-3" style={{ borderTop: "1px solid rgba(255,255,255,0.07)" }}>
           <div className="flex gap-2 items-end">
             <div className="flex-1 space-y-1">
-              <label className="text-[10px] text-[var(--gt-muted)]">Period</label>
+              <label className="text-[10px] text-white/40">Period</label>
               <select
                 value={goalPeriod}
                 onChange={(e) => onPeriodChange(e.target.value as GoalPeriod)}
-                className="w-full bg-[var(--gt-overlay)] rounded px-2 py-1.5 text-xs text-[var(--gt-text)] focus:outline-none focus:ring-1 focus:ring-[var(--gt-accent)]"
+                className="w-full rounded px-2 py-1.5 text-xs text-white focus:outline-none"
+                style={{ background: "rgba(255,255,255,0.08)", border: "1px solid rgba(255,255,255,0.1)" }}
               >
                 {availablePeriods.map((p) => (
                   <option key={p} value={p}>
@@ -943,7 +1254,7 @@ function GoalsSection({
               </select>
             </div>
             <div className="flex-1 space-y-1">
-              <label className="text-[10px] text-[var(--gt-muted)]">Target (hours)</label>
+              <label className="text-[10px] text-white/40">Target (hours)</label>
               <input
                 type="number"
                 min="0.5"
@@ -953,19 +1264,20 @@ function GoalsSection({
                 onKeyDown={(e) => { if (e.key === "Enter") onSave(); if (e.key === "Escape") onCloseForm(); }}
                 placeholder="e.g. 10"
                 autoFocus
-                className="w-full bg-[var(--gt-overlay)] rounded px-2 py-1.5 text-xs text-[var(--gt-text)] placeholder-[var(--gt-muted)] focus:outline-none focus:ring-1 focus:ring-[var(--gt-accent)]"
+                className="w-full rounded px-2 py-1.5 text-xs text-white placeholder-white/30 focus:outline-none"
+                style={{ background: "rgba(255,255,255,0.08)", border: "1px solid rgba(255,255,255,0.1)" }}
               />
             </div>
             <button
               onClick={onSave}
               disabled={saving}
-              className="flex items-center gap-1 px-3 py-1.5 rounded bg-[var(--gt-accent)] text-[var(--gt-base)] text-xs font-medium hover:bg-[var(--gt-accent-dim)] disabled:opacity-50 transition-colors"
+              className="flex items-center gap-1 px-3 py-1.5 rounded bg-white text-black text-xs font-medium disabled:opacity-50 transition-colors"
             >
               <Check size={12} /> Save
             </button>
             <button
               onClick={onCloseForm}
-              className="px-2 py-1.5 rounded border border-[var(--gt-overlay)] text-[var(--gt-muted)] hover:text-[var(--gt-text)] text-xs transition-colors"
+              className="px-2 py-1.5 rounded border border-white/10 text-white/40 hover:text-white text-xs transition-colors"
             >
               <X size={12} />
             </button>
@@ -999,7 +1311,7 @@ function DailyBreakdown({
   onConfirmDelete,
   onCancelDelete,
 }: {
-  sessions: { startedAt: string; durationSecs?: number | null; id: string }[];
+  sessions: { startedAt: string; endedAt?: string | null; durationSecs?: number | null; id: string }[];
   confirmDeleteSessionId: string | null;
   onRequestDelete: (id: string) => void;
   onConfirmDelete: (id: string) => void;
@@ -1018,7 +1330,7 @@ function DailyBreakdown({
   }
 
   const sorted = Array.from(byDay.entries()).sort(([a], [b]) => b.localeCompare(a));
-  if (sorted.length === 0) return <p className="text-sm text-[var(--gt-muted)]">No session data yet.</p>;
+  if (sorted.length === 0) return <p className="text-sm text-white/40">No session data yet.</p>;
 
   const byMonth = new Map<string, typeof sorted>();
   for (const entry of sorted) {
@@ -1038,8 +1350,8 @@ function DailyBreakdown({
         return (
           <div key={month}>
             <div className="flex items-center justify-between mb-2">
-              <h4 className="text-xs font-semibold text-[var(--gt-text)]">{label}</h4>
-              <div className="text-xs text-[var(--gt-muted)]">
+              <h4 className="text-xs font-semibold text-white">{label}</h4>
+              <div className="text-xs text-white/40">
                 {formatHours(monthTotal)} · {monthSessions} session{monthSessions !== 1 ? "s" : ""}
               </div>
             </div>
@@ -1047,33 +1359,39 @@ function DailyBreakdown({
               {days.map(([day, data]) => (
                 <div key={day}>
                   <div
-                    className="flex items-center gap-4 px-3 py-2 rounded-lg bg-[var(--gt-surface)] border border-[var(--gt-overlay)] cursor-pointer hover:border-[var(--gt-hover)] transition-colors"
+                    className="flex items-center gap-4 px-3 py-2 rounded-xl cursor-pointer transition-colors"
+                    style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.07)" }}
                     onClick={() => setExpanded(expanded === day ? null : day)}
                   >
-                    <span className="text-xs text-[var(--gt-sub)] w-24 flex-shrink-0">{day}</span>
-                    <div className="flex-1 bg-[var(--gt-overlay)] rounded-full h-1.5 overflow-hidden">
-                      <div className="h-full rounded-full bg-[var(--gt-blue)]" style={{ width: `${Math.min((data.totalSecs / 14400) * 100, 100)}%` }} />
+                    <span className="text-xs text-white/55 w-24 flex-shrink-0">{day}</span>
+                    <div className="flex-1 rounded-full h-1.5 overflow-hidden" style={{ background: "rgba(255,255,255,0.08)" }}>
+                      <div className="h-full rounded-full bg-blue-400" style={{ width: `${Math.min((data.totalSecs / 14400) * 100, 100)}%` }} />
                     </div>
-                    <span className="text-xs font-medium text-[var(--gt-text)] w-12 text-right flex-shrink-0">{formatHours(data.totalSecs)}</span>
-                    <span className="text-xs text-[var(--gt-muted)] w-16 text-right flex-shrink-0">{data.count} session{data.count !== 1 ? "s" : ""}</span>
+                    <span className="text-xs font-medium text-white w-12 text-right flex-shrink-0">{formatHours(data.totalSecs)}</span>
+                    <span className="text-xs text-white/40 w-16 text-right flex-shrink-0">{data.count} session{data.count !== 1 ? "s" : ""}</span>
                   </div>
                   {expanded === day && (
                     <div className="ml-4 mt-1 space-y-1">
                       {data.sessions.map((s) => (
-                        <div key={s.id} className="flex items-center gap-3 px-3 py-1.5 rounded-md bg-[var(--gt-overlay)]/40 border border-[var(--gt-overlay)] text-xs group">
-                          <span className="text-[var(--gt-sub)] flex-1">{formatDate(s.startedAt)}</span>
-                          <span className="text-[var(--gt-text)] font-medium">{s.durationSecs ? formatDuration(s.durationSecs) : "—"}</span>
+                        <div key={s.id} className="flex items-center gap-3 px-3 py-1.5 rounded-lg text-xs group" style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.06)" }}>
+                          <span className="text-white/55 flex-1">
+                            {new Date(s.startedAt).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" })}
+                            {s.endedAt
+                              ? ` → ${new Date(s.endedAt).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" })}`
+                              : <span className="text-blue-400"> — Active</span>}
+                          </span>
+                          <span className="text-white font-medium">{s.durationSecs ? formatDuration(s.durationSecs) : "—"}</span>
                           {confirmDeleteSessionId === s.id ? (
                             <div className="flex items-center gap-1">
                               <button
                                 onClick={(e) => { e.stopPropagation(); onConfirmDelete(s.id); }}
-                                className="px-2 py-0.5 rounded text-xs bg-[var(--gt-red)] text-white cursor-pointer hover:bg-[var(--gt-red)]/80 transition-colors"
+                                className="px-2 py-0.5 rounded text-xs bg-red-500 text-white cursor-pointer hover:bg-red-500/80 transition-colors"
                               >
                                 Confirm
                               </button>
                               <button
                                 onClick={(e) => { e.stopPropagation(); onCancelDelete(); }}
-                                className="px-2 py-0.5 rounded text-xs border border-[var(--gt-overlay)] text-[var(--gt-sub)] cursor-pointer hover:text-[var(--gt-text)] transition-colors"
+                                className="px-2 py-0.5 rounded text-xs border border-white/10 text-white/50 cursor-pointer hover:text-white transition-colors"
                               >
                                 Cancel
                               </button>
@@ -1081,7 +1399,7 @@ function DailyBreakdown({
                           ) : (
                             <button
                               onClick={(e) => { e.stopPropagation(); onRequestDelete(s.id); }}
-                              className="opacity-0 group-hover:opacity-100 p-1 rounded text-[var(--gt-muted)] hover:text-[var(--gt-red)] hover:bg-[var(--gt-red)]/10 cursor-pointer transition-all"
+                              className="opacity-0 group-hover:opacity-100 p-1 rounded text-white/40 hover:text-red-400 hover:bg-red-500/10 cursor-pointer transition-all"
                               title="Delete session"
                             >
                               <Trash2 size={12} />

@@ -1,27 +1,12 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState, useEffect } from "react";
-import { Download, Trash2, MonitorPlay, FolderPlus, X, Pipette, FolderOpen, RefreshCw } from "lucide-react";
+import { Download, Trash2, MonitorPlay, FolderPlus, X, FolderOpen, RefreshCw } from "lucide-react";
 import { check } from "@tauri-apps/plugin-updater";
 import toast from "react-hot-toast";
-import { getSettings, updateSettings, exportData, resetDatabase, openDbFolder, UserSettings } from "../api/client";
+import { getSettings, updateSettings, exportData, resetDatabase, openDbFolder, getAutostart, setAutostart, UserSettings } from "../api/client";
 import { useUiStore } from "../store/uiStore";
 import { open as openDirDialog } from "@tauri-apps/plugin-dialog";
 
-const THEME_VARS: { key: string; label: string; group: string }[] = [
-  { key: "--gt-base",       label: "Background",      group: "Backgrounds" },
-  { key: "--gt-surface",    label: "Surface",         group: "Backgrounds" },
-  { key: "--gt-overlay",    label: "Overlay/Border",  group: "Backgrounds" },
-  { key: "--gt-hover",      label: "Hover",           group: "Backgrounds" },
-  { key: "--gt-text",       label: "Text",            group: "Text" },
-  { key: "--gt-sub",        label: "Subtext",         group: "Text" },
-  { key: "--gt-muted",      label: "Muted",           group: "Text" },
-  { key: "--gt-accent",     label: "Accent",          group: "Accent" },
-  { key: "--gt-accent-dim", label: "Accent Dim",      group: "Accent" },
-  { key: "--gt-blue",       label: "Blue",            group: "Highlights" },
-  { key: "--gt-green",      label: "Green",           group: "Highlights" },
-  { key: "--gt-red",        label: "Red",             group: "Highlights" },
-  { key: "--gt-yellow",     label: "Yellow",          group: "Highlights" },
-];
 
 const PRESETS: Record<string, { label: string; bg: string; accent: string; surface: string; colors: Record<string, string> }> = {
   catppuccin: {
@@ -62,11 +47,24 @@ export default function Settings() {
   const [confirmReset, setConfirmReset] = useState(false);
   const [checkingUpdate, setCheckingUpdate] = useState(false);
   const [downloadProgress, setDownloadProgress] = useState<number | null>(null);
-  const [saveNameInput, setSaveNameInput] = useState<string | null>(null);
-  const [activeSavedTheme, setActiveSavedTheme] = useState<string | null>(null);
+
   const { data: settings, isLoading } = useQuery({
     queryKey: ["settings"],
     queryFn: getSettings,
+  });
+
+  const { data: autostartEnabled = false } = useQuery({
+    queryKey: ["autostart"],
+    queryFn: getAutostart,
+  });
+
+  const autostartMutation = useMutation({
+    mutationFn: setAutostart,
+    onSuccess: (_, enabled) => {
+      queryClient.setQueryData(["autostart"], enabled);
+      toast.success(enabled ? "Will launch on startup" : "Removed from startup");
+    },
+    onError: () => toast.error("Failed to update startup setting"),
   });
 
   const [form, setForm] = useState<UserSettings | null>(null);
@@ -110,30 +108,24 @@ export default function Settings() {
   });
 
   if (isLoading || !form) {
-    return <div className="p-6 text-[var(--gt-muted)] text-sm">Loading…</div>;
+    return (
+      <div className="h-full flex items-center justify-center" style={{ background: "#050505" }}>
+        <div className="text-white/40 text-sm">Loading…</div>
+      </div>
+    );
   }
 
   const update = <K extends keyof UserSettings>(key: K, value: UserSettings[K]) => {
     setForm((f) => f ? { ...f, [key]: value } : f);
   };
 
-  function injectCustomStyle(colors: Record<string, string>) {
-    const vars = Object.entries(colors).map(([k, v]) => `${k}: ${v};`).join(" ");
-    let el = document.getElementById("gt-custom-theme") as HTMLStyleElement | null;
-    if (!el) {
-      el = document.createElement("style");
-      el.id = "gt-custom-theme";
-      document.head.appendChild(el);
-    }
-    el.textContent = `[data-theme="custom"] { ${vars} }`;
-    // Apply immediately by switching data-theme on the root div
-    document.querySelector("[data-theme]")?.setAttribute("data-theme", "custom");
-  }
-
   return (
-    <div className="p-6 max-w-lg mx-auto space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold text-[var(--gt-text)]">Settings</h1>
+    <div className="h-full overflow-auto">
+      <div className="fixed inset-0 z-0" style={{ background: "#050505" }} />
+      <div className="relative z-10 p-6 max-w-lg mx-auto space-y-5">
+      <div className="animate-ps5-fade">
+        <p className="text-xs text-white/35 uppercase tracking-[0.15em] mb-1">Preferences</p>
+        <h1 className="text-3xl font-bold text-white">Settings</h1>
       </div>
 
       {/* Scanning */}
@@ -145,14 +137,14 @@ export default function Settings() {
           onChange={(v) => update("scanOnLaunch", v)}
         />
         <div className="mt-3">
-          <label className="text-xs text-[var(--gt-sub)] block mb-1">Scan interval (hours)</label>
+          <label className="text-xs text-white/55 block mb-1">Scan interval (hours)</label>
           <input
             type="number"
             min={1}
             max={168}
             value={form.scanIntervalHours}
             onChange={(e) => update("scanIntervalHours", Number(e.target.value))}
-            className="bg-[var(--gt-surface)] border border-[var(--gt-overlay)] rounded-md px-3 py-1.5 text-sm text-[var(--gt-text)] w-24 focus:outline-none focus:border-[var(--gt-accent)]"
+            className="border border-white/10 bg-white/5 rounded-xl px-3 py-1.5 text-sm text-white w-24 focus:outline-none focus:border-white/30"
           />
         </div>
       </Section>
@@ -165,6 +157,12 @@ export default function Settings() {
           checked={form.minimizeToTray}
           onChange={(v) => update("minimizeToTray", v)}
         />
+        <Toggle
+          label="Launch on startup"
+          description="Automatically start Gamer Pulse when Windows boots"
+          checked={autostartEnabled}
+          onChange={(v) => autostartMutation.mutate(v)}
+        />
       </Section>
 
       {/* Data */}
@@ -172,40 +170,40 @@ export default function Settings() {
         <button
           onClick={() => exportMutation.mutate()}
           disabled={exportMutation.isPending}
-          className="flex items-center gap-2 px-4 py-2 rounded-md bg-[var(--gt-overlay)] text-sm text-[var(--gt-text)] hover:bg-[var(--gt-hover)] disabled:opacity-50 transition-colors"
+          className="flex items-center gap-2 px-4 py-2 rounded-xl bg-white/8 text-sm text-white hover:bg-white/12 disabled:opacity-50 transition-colors"
         >
           <Download size={14} />
           Export Data (JSON)
         </button>
-        <p className="text-xs text-[var(--gt-muted)] mt-1">
+        <p className="text-xs text-white/40 mt-1">
           Exports all games and session history to a JSON file.
         </p>
 
-        <div className="border-t border-[var(--gt-overlay)] pt-3 mt-3">
+        <div className="border-t border-white/10 pt-3 mt-3">
           <button
             onClick={() => openDbFolder().catch(() => toast.error("Could not open folder"))}
-            className="flex items-center gap-2 px-4 py-2 rounded-md bg-[var(--gt-overlay)] text-sm text-[var(--gt-text)] hover:bg-[var(--gt-hover)] transition-colors cursor-pointer"
+            className="flex items-center gap-2 px-4 py-2 rounded-xl bg-white/8 text-sm text-white hover:bg-white/12 transition-colors cursor-pointer"
           >
             <FolderOpen size={14} />
             Open Database Folder
           </button>
-          <p className="text-xs text-[var(--gt-muted)] mt-1">
+          <p className="text-xs text-white/40 mt-1">
             Opens the folder containing the SQLite database file.
           </p>
         </div>
 
-        <div className="border-t border-[var(--gt-overlay)] pt-3 mt-3">
+        <div className="border-t border-white/10 pt-3 mt-3">
           <button
             onClick={() => setSplashVisible(true)}
-            className="flex items-center gap-2 px-4 py-2 rounded-md bg-[var(--gt-overlay)] text-sm text-[var(--gt-text)] hover:bg-[var(--gt-hover)] transition-colors"
+            className="flex items-center gap-2 px-4 py-2 rounded-xl bg-white/8 text-sm text-white hover:bg-white/12 transition-colors"
           >
             <MonitorPlay size={14} />
             Preview Loading Screen
           </button>
-          <p className="text-xs text-[var(--gt-muted)] mt-1">Shows the startup splash screen for 2 seconds.</p>
+          <p className="text-xs text-white/40 mt-1">Shows the startup splash screen for 2 seconds.</p>
         </div>
 
-        <div className="border-t border-[var(--gt-overlay)] pt-3 mt-3">
+        <div className="border-t border-white/10 pt-3 mt-3">
           <button
             onClick={async () => {
               setCheckingUpdate(true);
@@ -239,30 +237,30 @@ export default function Settings() {
               }
             }}
             disabled={checkingUpdate}
-            className="flex items-center gap-2 px-4 py-2 rounded-md bg-[var(--gt-overlay)] text-sm text-[var(--gt-text)] hover:bg-[var(--gt-hover)] disabled:opacity-50 transition-colors"
+            className="flex items-center gap-2 px-4 py-2 rounded-xl bg-white/8 text-sm text-white hover:bg-white/12 disabled:opacity-50 transition-colors"
           >
             <RefreshCw size={14} className={checkingUpdate ? "animate-spin" : ""} />
             {checkingUpdate ? "Updating…" : "Check for Updates"}
           </button>
           {downloadProgress !== null && (
             <div className="mt-2">
-              <div className="h-1.5 bg-[var(--gt-overlay)] rounded-full overflow-hidden">
+              <div className="h-1.5 bg-white/8 rounded-full overflow-hidden">
                 <div
                   className="h-full bg-[var(--gt-accent)] rounded-full transition-all duration-300"
                   style={{ width: `${downloadProgress}%` }}
                 />
               </div>
-              <p className="text-xs text-[var(--gt-muted)] mt-1">{downloadProgress < 100 ? `Downloading… ${downloadProgress}%` : "Installing…"}</p>
+              <p className="text-xs text-white/40 mt-1">{downloadProgress < 100 ? `Downloading… ${downloadProgress}%` : "Installing…"}</p>
             </div>
           )}
-          <p className="text-xs text-[var(--gt-muted)] mt-1">Current version: v0.1.6</p>
+          <p className="text-xs text-white/40 mt-1">Current version: v0.2.0</p>
         </div>
 
-        <div className="border-t border-[var(--gt-overlay)] pt-3 mt-1">
+        <div className="border-t border-white/10 pt-3 mt-1">
           {!confirmReset ? (
             <button
               onClick={() => setConfirmReset(true)}
-              className="flex items-center gap-2 px-4 py-2 rounded-md bg-[var(--gt-red)]/10 border border-[var(--gt-red)]/30 text-sm text-[var(--gt-red)] hover:bg-[var(--gt-red)]/20 transition-colors"
+              className="flex items-center gap-2 px-4 py-2 rounded-xl bg-[var(--gt-red)]/10 border border-[var(--gt-red)]/30 text-sm text-[var(--gt-red)] hover:bg-[var(--gt-red)]/20 transition-colors"
             >
               <Trash2 size={14} />
               Reset Database
@@ -273,19 +271,19 @@ export default function Settings() {
               <button
                 onClick={() => resetMutation.mutate()}
                 disabled={resetMutation.isPending}
-                className="px-3 py-1.5 rounded-md bg-[var(--gt-red)] text-[var(--gt-base)] text-sm font-medium hover:bg-[var(--gt-red)]/80 disabled:opacity-50 transition-colors"
+                className="px-3 py-1.5 rounded-xl bg-[var(--gt-red)] text-[var(--gt-base)] text-sm font-medium hover:bg-[var(--gt-red)]/80 disabled:opacity-50 transition-colors"
               >
                 Yes, delete all
               </button>
               <button
                 onClick={() => setConfirmReset(false)}
-                className="px-3 py-1.5 rounded-md border border-[var(--gt-overlay)] text-sm text-[var(--gt-sub)] hover:text-[var(--gt-text)] transition-colors"
+                className="px-3 py-1.5 rounded-xl border border-white/10 text-sm text-white/55 hover:text-white transition-colors"
               >
                 Cancel
               </button>
             </div>
           )}
-          <p className="text-xs text-[var(--gt-muted)] mt-1">
+          <p className="text-xs text-white/40 mt-1">
             Removes all games, sessions, and achievements. Cannot be undone.
           </p>
         </div>
@@ -293,23 +291,23 @@ export default function Settings() {
 
       {/* Custom Scan Locations */}
       <Section title="Custom Scan Locations">
-        <p className="text-xs text-[var(--gt-muted)]">
+        <p className="text-xs text-white/40">
           Add folders to scan for games. Each immediate subfolder containing an executable will be added as a game.
         </p>
         <div className="space-y-1 mt-1">
           {(form.customScanPaths ?? []).map((path, i) => (
-            <div key={i} className="flex items-center gap-2 px-3 py-2 rounded-md bg-[var(--gt-overlay)]/50 border border-[var(--gt-overlay)]">
-              <span className="flex-1 text-xs text-[var(--gt-sub)] truncate" title={path}>{path}</span>
+            <div key={i} className="flex items-center gap-2 px-3 py-2 rounded-xl bg-white/8/50 border border-white/10">
+              <span className="flex-1 text-xs text-white/55 truncate" title={path}>{path}</span>
               <button
                 onClick={() => update("customScanPaths", (form.customScanPaths ?? []).filter((_, j) => j !== i))}
-                className="flex-shrink-0 p-0.5 rounded text-[var(--gt-muted)] hover:text-[var(--gt-red)] cursor-pointer transition-colors"
+                className="flex-shrink-0 p-0.5 rounded text-white/40 hover:text-[var(--gt-red)] cursor-pointer transition-colors"
               >
                 <X size={13} />
               </button>
             </div>
           ))}
           {(form.customScanPaths ?? []).length === 0 && (
-            <p className="text-xs text-[var(--gt-muted)] italic">No folders added yet.</p>
+            <p className="text-xs text-white/40 italic">No folders added yet.</p>
           )}
         </div>
         <button
@@ -322,7 +320,7 @@ export default function Settings() {
               }
             }
           }}
-          className="flex items-center gap-2 px-3 py-1.5 rounded-md border border-[var(--gt-overlay)] text-sm text-[var(--gt-sub)] hover:text-[var(--gt-text)] hover:border-[var(--gt-accent)] cursor-pointer transition-colors mt-1"
+          className="flex items-center gap-2 px-3 py-1.5 rounded-xl border border-white/10 text-sm text-white/55 hover:text-white hover:border-[var(--gt-accent)] cursor-pointer transition-colors mt-1"
         >
           <FolderPlus size={14} />
           Add Folder
@@ -341,10 +339,9 @@ export default function Settings() {
                 onClick={() => {
                   setForm((f) => f ? { ...f, theme: key, customThemeColors: { ...p.colors } } : f);
                   document.querySelector("[data-theme]")?.setAttribute("data-theme", key);
-                  setActiveSavedTheme(null);
                 }}
                 className={`rounded-lg border-2 p-3 text-left cursor-pointer transition-all ${
-                  active ? "border-[var(--gt-accent)]" : "border-[var(--gt-overlay)] hover:border-[var(--gt-hover)]"
+                  active ? "border-[var(--gt-accent)]" : "border-white/10 hover:border-[var(--gt-hover)]"
                 }`}
                 style={{ background: p.bg }}
               >
@@ -357,195 +354,32 @@ export default function Settings() {
               </button>
             );
           })}
-          {/* Custom card */}
-          <button
-            onClick={() => {
-              setForm((f) => {
-                if (!f) return f;
-                // Seed from the current effective colors so pickers don't go black
-                const effective = {
-                  ...(PRESETS[f.theme]?.colors ?? PRESETS.catppuccin.colors),
-                  ...(f.customThemeColors ?? {}),
-                };
-                injectCustomStyle(effective);
-                return { ...f, theme: "custom", customThemeColors: effective };
-              });
-              setActiveSavedTheme(null);
-            }}
-            className={`rounded-lg border-2 p-3 text-left cursor-pointer transition-all ${
-              form.theme === "custom" && !activeSavedTheme ? "border-[var(--gt-accent)]" : "border-[var(--gt-overlay)] hover:border-[var(--gt-hover)]"
-            } bg-[var(--gt-surface)]`}
-          >
-            <div className="flex gap-1 mb-2">
-              <Pipette size={12} className="text-[var(--gt-accent)]" />
-            </div>
-            <p className="text-xs font-medium text-[var(--gt-text)]">Custom</p>
-          </button>
         </div>
 
-        {/* Saved theme cards */}
-        {Object.keys(form.savedThemes ?? {}).length > 0 && (
-          <div className="mt-2">
-            <p className="text-[10px] font-semibold text-[var(--gt-muted)] uppercase tracking-wider mb-1.5">Saved</p>
-            <div className="grid grid-cols-4 gap-2">
-              {Object.entries(form.savedThemes ?? {}).map(([name, themeColors]) => {
-                const bg = themeColors["--gt-base"] ?? "#1e1e2e";
-                const accent = themeColors["--gt-accent"] ?? "#cba6f7";
-                const surface = themeColors["--gt-surface"] ?? "#313244";
-                return (
-                  <div key={name} className="relative group">
-                    <button
-                      onClick={() => {
-                        const next = { ...themeColors };
-                        injectCustomStyle(next);
-                        setForm((f) => f ? { ...f, theme: "custom", customThemeColors: next } : f);
-                        setActiveSavedTheme(name);
-                      }}
-                      className={`w-full rounded-lg border-2 p-3 text-left cursor-pointer transition-all ${
-                        activeSavedTheme === name ? "border-[var(--gt-accent)]" : "border-[var(--gt-overlay)] hover:border-[var(--gt-hover)]"
-                      }`}
-                      style={{ background: bg }}
-                    >
-                      <div className="flex gap-1 mb-2">
-                        <span className="w-3 h-3 rounded-full" style={{ background: accent }} />
-                        <span className="w-3 h-3 rounded-full" style={{ background: surface }} />
-                        <span className="w-3 h-3 rounded-full opacity-50" style={{ background: accent }} />
-                      </div>
-                      <p className="text-xs font-medium text-white truncate">{name}</p>
-                    </button>
-                    <button
-                      onClick={() => {
-                        const next = { ...(form.savedThemes ?? {}) };
-                        delete next[name];
-                        setForm((f) => f ? { ...f, savedThemes: next } : f);
-                      }}
-                      className="absolute top-1 right-1 w-4 h-4 rounded-full bg-[var(--gt-red)]/80 text-white items-center justify-center hidden group-hover:flex transition-all"
-                      title="Delete theme"
-                    >
-                      <X size={8} />
-                    </button>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        )}
-
-        {/* Color pickers — always visible, seeded from current theme */}
-        <div className="mt-4 space-y-3">
-          {["Backgrounds", "Text", "Accent", "Highlights"].map((group) => {
-            const vars = THEME_VARS.filter((v) => v.group === group);
-            const colors: Record<string, string> = form.customThemeColors ?? {};
-            const preset = PRESETS[form.theme];
-            return (
-              <div key={group}>
-                <p className="text-[10px] font-semibold text-[var(--gt-muted)] uppercase tracking-wider mb-1.5">{group}</p>
-                <div className="grid grid-cols-2 gap-1.5">
-                  {vars.map(({ key, label }) => {
-                    const value = colors[key] ?? preset?.colors[key] ?? "#000000";
-                    return (
-                      <label key={key} className="flex items-center gap-2 px-2 py-1.5 rounded-md bg-[var(--gt-overlay)]/50 border border-[var(--gt-overlay)] cursor-pointer hover:border-[var(--gt-hover)] transition-colors">
-                        <input
-                          type="color"
-                          value={value}
-                          onChange={(e) => {
-                            // Always merge preset + custom so all 13 vars are present
-                            const next = {
-                              ...(PRESETS[form.theme]?.colors ?? {}),
-                              ...(form.customThemeColors ?? {}),
-                              [key]: e.target.value,
-                            };
-                            setForm((f) => f ? { ...f, theme: "custom", customThemeColors: next } : f);
-                            injectCustomStyle(next);
-                            setActiveSavedTheme(null);
-                          }}
-                          className="w-5 h-5 rounded cursor-pointer border-0 bg-transparent p-0"
-                          style={{ appearance: "none" }}
-                        />
-                        <span className="text-xs text-[var(--gt-sub)]">{label}</span>
-                        <span className="ml-auto text-[10px] text-[var(--gt-muted)] font-mono">{value}</span>
-                      </label>
-                    );
-                  })}
-                </div>
-              </div>
-            );
-          })}
-          {/* Save as named theme */}
-          <div className="pt-3 border-t border-[var(--gt-overlay)]">
-            {saveNameInput === null ? (
-              <button
-                onClick={() => setSaveNameInput("")}
-                className="flex items-center gap-2 px-3 py-1.5 rounded-md border border-[var(--gt-overlay)] text-xs text-[var(--gt-sub)] hover:text-[var(--gt-text)] hover:border-[var(--gt-accent)] cursor-pointer transition-colors"
-              >
-                Save as named theme…
-              </button>
-            ) : (
-              <div className="flex items-center gap-2">
-                <input
-                  type="text"
-                  autoFocus
-                  placeholder="Theme name"
-                  value={saveNameInput}
-                  onChange={(e) => setSaveNameInput(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Escape") { setSaveNameInput(null); return; }
-                    if (e.key === "Enter" && saveNameInput.trim()) {
-                      const name = saveNameInput.trim();
-                      const colorsToSave = {
-                        ...(PRESETS[form.theme]?.colors ?? {}),
-                        ...(form.customThemeColors ?? {}),
-                      };
-                      setForm((f) => f ? { ...f, savedThemes: { ...(f.savedThemes ?? {}), [name]: colorsToSave } } : f);
-                      setSaveNameInput(null);
-                    }
-                  }}
-                  className="flex-1 bg-[var(--gt-surface)] border border-[var(--gt-overlay)] rounded-md px-3 py-1.5 text-sm text-[var(--gt-text)] focus:outline-none focus:border-[var(--gt-accent)]"
-                />
-                <button
-                  onClick={() => {
-                    const name = saveNameInput.trim();
-                    if (!name) return;
-                    const colorsToSave = {
-                      ...(PRESETS[form.theme]?.colors ?? {}),
-                      ...(form.customThemeColors ?? {}),
-                    };
-                    setForm((f) => f ? { ...f, savedThemes: { ...(f.savedThemes ?? {}), [name]: colorsToSave } } : f);
-                    setSaveNameInput(null);
-                  }}
-                  disabled={!saveNameInput.trim()}
-                  className="px-3 py-1.5 rounded-md bg-[var(--gt-accent)] text-[var(--gt-base)] text-xs font-medium disabled:opacity-40 hover:bg-[var(--gt-accent-dim)] transition-colors"
-                >
-                  Save
-                </button>
-                <button
-                  onClick={() => setSaveNameInput(null)}
-                  className="p-1.5 rounded-md text-[var(--gt-muted)] hover:text-[var(--gt-text)] transition-colors"
-                >
-                  <X size={14} />
-                </button>
-              </div>
-            )}
-          </div>
-        </div>
+        {/* TODO: custom theme color pickers + saved themes — commented out for now
+        ...
+        */}
       </Section>
 
       {/* Save */}
       <button
         onClick={() => saveMutation.mutate(form)}
         disabled={saveMutation.isPending}
-        className="w-full py-2.5 rounded-lg bg-[var(--gt-accent)] text-[var(--gt-base)] font-semibold text-sm hover:bg-[var(--gt-accent-dim)] disabled:opacity-50 transition-colors"
+        className="w-full py-3 rounded-2xl bg-white text-black font-semibold text-sm hover:bg-white/90 disabled:opacity-50 transition-colors cursor-pointer"
       >
-        Save Settings
+        {saveMutation.isPending ? "Saving…" : "Save Settings"}
       </button>
+
+      <div className="h-4" />
+      </div>
     </div>
   );
 }
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <div className="bg-[var(--gt-surface)] rounded-lg border border-[var(--gt-overlay)] p-4 space-y-3">
-      <h3 className="text-xs font-semibold text-[var(--gt-sub)] uppercase tracking-wider">{title}</h3>
+    <div className="rounded-2xl p-5 space-y-4" style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.07)" }}>
+      <h3 className="text-xs font-semibold text-white/40 uppercase tracking-[0.12em]">{title}</h3>
       {children}
     </div>
   );
@@ -565,13 +399,13 @@ function Toggle({
   return (
     <div className="flex items-start justify-between gap-4">
       <div className="flex-1">
-        <p className="text-sm text-[var(--gt-text)]">{label}</p>
-        {description && <p className="text-xs text-[var(--gt-muted)] mt-0.5">{description}</p>}
+        <p className="text-sm text-white">{label}</p>
+        {description && <p className="text-xs text-white/40 mt-0.5">{description}</p>}
       </div>
       <button
         onClick={() => onChange(!checked)}
         className={`relative w-9 h-5 rounded-full transition-colors flex-shrink-0 mt-0.5 ${
-          checked ? "bg-[var(--gt-accent)]" : "bg-[var(--gt-overlay)]"
+          checked ? "bg-[var(--gt-accent)]" : "bg-white/15"
         }`}
       >
         <div

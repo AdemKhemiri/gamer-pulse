@@ -198,7 +198,8 @@ export default function SpinToPick() {
   };
 
   return (
-    <div className="flex flex-col h-full overflow-y-auto bg-[var(--gt-base)]">
+    <div className="flex flex-col h-full overflow-y-auto" style={{ background: "#050505" }}>
+      <div className="fixed inset-0 z-0" style={{ background: "radial-gradient(ellipse at 50% 30%, rgba(80,40,140,0.15) 0%, transparent 60%), #050505" }} />
       <style>{`
         @keyframes result-in {
           from { opacity: 0; transform: translateY(10px) scale(0.97); }
@@ -211,20 +212,19 @@ export default function SpinToPick() {
       `}</style>
 
       {/* Page header */}
-      <div className="px-6 pt-6 pb-2">
+      <div className="relative z-10 px-6 pt-6 pb-2">
         <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl flex items-center justify-center"
-            style={{ background: "var(--gt-accent)22" }}>
-            <Dices size={20} style={{ color: "var(--gt-accent)" }} />
+          <div className="w-10 h-10 rounded-xl flex items-center justify-center" style={{ background: "rgba(203,166,247,0.12)" }}>
+            <Dices size={20} className="text-[var(--gt-accent)]" />
           </div>
           <div>
-            <h1 className="text-xl font-bold" style={{ color: "var(--gt-text)" }}>What to Play?</h1>
-            <p className="text-xs" style={{ color: "var(--gt-muted)" }}>Let fate decide your next game</p>
+            <p className="text-xs text-white/35 uppercase tracking-[0.15em]">Random</p>
+            <h1 className="text-2xl font-bold text-white">Spin to Pick</h1>
           </div>
         </div>
       </div>
 
-      <div className="flex-1 flex flex-col items-center gap-6 px-6 pb-6 pt-4">
+      <div className="relative z-10 flex-1 flex flex-col items-center gap-6 px-6 pb-6 pt-4">
 
         {/* ── Reel section ── */}
         <div className="flex flex-col items-center gap-4 w-full">
@@ -235,16 +235,16 @@ export default function SpinToPick() {
             style={{
               width: CONTAINER_W,
               height: CARD_H + 24,
-              background: "var(--gt-surface)",
-              border: "1px solid var(--gt-overlay)",
+              background: "rgba(255,255,255,0.04)",
+              border: "1px solid rgba(255,255,255,0.08)",
             }}
           >
             {/* Left fade */}
             <div className="absolute inset-y-0 left-0 w-32 z-10 pointer-events-none"
-              style={{ background: "linear-gradient(to right, var(--gt-surface) 20%, transparent 100%)" }} />
+              style={{ background: "linear-gradient(to right, rgba(5,5,5,0.9) 20%, transparent 100%)" }} />
             {/* Right fade */}
             <div className="absolute inset-y-0 right-0 w-32 z-10 pointer-events-none"
-              style={{ background: "linear-gradient(to left, var(--gt-surface) 20%, transparent 100%)" }} />
+              style={{ background: "linear-gradient(to left, rgba(5,5,5,0.9) 20%, transparent 100%)" }} />
 
             {/* Center selector border */}
             <div
@@ -325,7 +325,7 @@ export default function SpinToPick() {
             {/* Idle hint */}
             {!hasSpun && (
               <div className="absolute inset-0 flex items-center justify-center z-20">
-                <p className="text-sm" style={{ color: "var(--gt-muted)" }}>Press Spin to start</p>
+                <p className="text-sm text-white/35">Press Spin to start</p>
               </div>
             )}
           </div>
@@ -352,36 +352,27 @@ export default function SpinToPick() {
             <div
               className="flex items-center gap-4 p-4 rounded-2xl w-full max-w-md"
               style={{
-                background: "var(--gt-surface)",
-                border: "1px solid var(--gt-accent)55",
-                boxShadow: "0 0 40px var(--gt-accent)18",
+                background: "rgba(255,255,255,0.05)",
+                border: "1px solid rgba(203,166,247,0.35)",
+                boxShadow: "0 0 40px rgba(203,166,247,0.1)",
                 animation: "result-in 0.45s cubic-bezier(0.2, 0.8, 0.3, 1) both",
               }}
             >
               {/* Cover thumbnail */}
-              <div className="flex-shrink-0 w-14 h-20 rounded-xl overflow-hidden"
-                style={{ outline: "1px solid var(--gt-accent)40" }}>
+              <div className="flex-shrink-0 w-14 h-20 rounded-xl overflow-hidden" style={{ border: "1px solid rgba(203,166,247,0.3)" }}>
                 {result.coverUrl ? (
                   <img src={result.coverUrl} alt={result.name} className="w-full h-full object-cover" />
                 ) : (
-                  <div className="w-full h-full flex items-center justify-center p-1"
-                    style={{ background: "var(--gt-overlay)" }}>
-                    <span className="text-center" style={{ color: "var(--gt-sub)", fontSize: 9 }}>
-                      {result.name}
-                    </span>
+                  <div className="w-full h-full flex items-center justify-center p-1" style={{ background: "rgba(255,255,255,0.08)" }}>
+                    <span className="text-center text-white/50" style={{ fontSize: 9 }}>{result.name}</span>
                   </div>
                 )}
               </div>
 
               <div className="flex-1 min-w-0">
-                <p className="font-semibold uppercase tracking-widest mb-0.5"
-                  style={{ color: "var(--gt-accent)", fontSize: 9 }}>
-                  Today's Pick
-                </p>
-                <p className="text-base font-bold truncate" style={{ color: "var(--gt-text)" }}>
-                  {result.name}
-                </p>
-                <p className="text-xs mt-0.5" style={{ color: "var(--gt-muted)" }}>Ready to play</p>
+                <p className="text-[var(--gt-accent)] font-semibold uppercase tracking-widest mb-0.5" style={{ fontSize: 9 }}>Today's Pick</p>
+                <p className="text-base font-bold truncate text-white">{result.name}</p>
+                <p className="text-xs mt-0.5 text-white/40">Ready to play</p>
               </div>
 
               <button
@@ -403,29 +394,21 @@ export default function SpinToPick() {
         {/* ── Game pool selector ── */}
         <div className="w-full flex flex-col gap-3">
           <div className="flex items-center justify-between">
-            <h2 className="text-sm font-semibold" style={{ color: "var(--gt-text)" }}>
-              Game Pool
-              <span className="ml-2 font-normal text-xs" style={{ color: "var(--gt-muted)" }}>
-                {pool.length} / {allGames.length} selected
-              </span>
-            </h2>
+            <div>
+              <h2 className="text-xs text-white/40 uppercase tracking-[0.12em] font-semibold">Game Pool</h2>
+              <p className="text-xs text-white/30 mt-0.5">{pool.length} / {allGames.length} selected</p>
+            </div>
             <div className="flex gap-3">
               <button
                 onClick={() => setSelectedIds(new Set(allGames.map((g) => g.id)))}
-                className="text-xs transition-colors"
-                style={{ color: "var(--gt-sub)" }}
-                onMouseOver={(e) => (e.currentTarget.style.color = "var(--gt-accent)")}
-                onMouseOut={(e) => (e.currentTarget.style.color = "var(--gt-sub)")}
+                className="text-xs text-white/40 hover:text-white/80 transition-colors cursor-pointer"
               >
                 Select all
               </button>
-              <span style={{ color: "var(--gt-overlay)" }}>·</span>
+              <span className="text-white/15">·</span>
               <button
                 onClick={() => setSelectedIds(new Set())}
-                className="text-xs transition-colors"
-                style={{ color: "var(--gt-sub)" }}
-                onMouseOver={(e) => (e.currentTarget.style.color = "var(--gt-red)")}
-                onMouseOut={(e) => (e.currentTarget.style.color = "var(--gt-sub)")}
+                className="text-xs text-white/40 hover:text-red-400 transition-colors cursor-pointer"
               >
                 Clear
               </button>
@@ -433,11 +416,9 @@ export default function SpinToPick() {
           </div>
 
           {isLoading ? (
-            <p className="text-sm" style={{ color: "var(--gt-muted)" }}>Loading games…</p>
+            <p className="text-sm text-white/30">Loading games…</p>
           ) : allGames.length === 0 ? (
-            <p className="text-sm" style={{ color: "var(--gt-muted)" }}>
-              No installed games found in your library.
-            </p>
+            <p className="text-sm text-white/30">No installed games found in your library.</p>
           ) : (
             <div
               className="grid gap-2"
@@ -463,10 +444,9 @@ export default function SpinToPick() {
                     ) : (
                       <div
                         className="w-full h-full flex items-center justify-center p-1"
-                        style={{ background: "var(--gt-overlay)" }}
+                        style={{ background: "rgba(255,255,255,0.08)" }}
                       >
-                        <span className="text-center leading-tight"
-                          style={{ color: "var(--gt-sub)", fontSize: 9 }}>
+                        <span className="text-center leading-tight text-white/50" style={{ fontSize: 9 }}>
                           {game.name}
                         </span>
                       </div>
