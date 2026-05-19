@@ -10,6 +10,11 @@ const APP_NAME: &str = "GamerPulse";
 const RUN_KEY: &str = "Software\\Microsoft\\Windows\\CurrentVersion\\Run";
 
 #[tauri::command]
+pub fn is_hidden_launch() -> bool {
+    std::env::args().any(|a| a == "--hidden")
+}
+
+#[tauri::command]
 pub fn get_autostart() -> bool {
     #[cfg(target_os = "windows")]
     {
@@ -37,7 +42,7 @@ pub fn set_autostart(enabled: bool) -> Result<()> {
             .map_err(|e| AppError::Other(e.to_string()))?;
         if enabled {
             let exe = std::env::current_exe().map_err(|e| AppError::Other(e.to_string()))?;
-            let val = format!("\"{}\"", exe.display());
+            let val = format!("\"{}\" --hidden", exe.display());
             run_key.set_value(APP_NAME, &val).map_err(|e| AppError::Other(e.to_string()))?;
         } else {
             let _ = run_key.delete_value(APP_NAME);

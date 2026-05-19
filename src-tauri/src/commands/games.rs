@@ -20,7 +20,11 @@ pub async fn get_games(
     let mut source_val = String::new();
 
     if let Some(ref s) = filter.status {
-        status_clause = format!("g.status = '{}'", s.replace('\'', "''"));
+        if s != "all" {
+            status_clause = format!("g.status = '{}'", s.replace('\'', "''"));
+        } else {
+            status_clause = "1=1".to_string();
+        }
     }
     if let Some(ref s) = filter.search {
         search_val = format!("%{}%", s.replace('\'', "''"));
@@ -54,6 +58,15 @@ pub async fn get_games(
         _ => "g.name ASC",
     };
 
+    let (collection_join, collection_clause) = if let Some(ref cid) = filter.collection_id {
+        (
+            format!(" INNER JOIN collection_games cg ON cg.game_id = g.id AND cg.collection_id = '{}'", cid.replace('\'', "''")),
+            String::new(),
+        )
+    } else {
+        (String::new(), String::new())
+    };
+
     let sql = format!(
         r#"SELECT g.id, g.name, g.source, g.source_id, g.install_path, g.exe_path,
                   g.cover_url, g.bg_url, g.status, g.is_favorite, g.notes, g.tags,
@@ -62,8 +75,8 @@ pub async fn get_games(
                   MAX(s.started_at) AS last_played_at,
                   COUNT(s.id) AS session_count
            FROM games g
-           LEFT JOIN sessions s ON s.game_id = g.id AND s.ended_at IS NOT NULL
-           WHERE {status_clause}{search_clause}{source_clause}{favorites_clause}
+           LEFT JOIN sessions s ON s.game_id = g.id AND s.ended_at IS NOT NULL{collection_join}
+           WHERE {status_clause}{search_clause}{source_clause}{favorites_clause}{collection_clause}
            GROUP BY g.id
            ORDER BY {sort}"#
     );
@@ -175,8 +188,14 @@ pub async fn update_game(state: State<'_, AppState>, id: String, patch: GamePatc
         if let Some(ref status) = patch.status {
             if status == "deleted" {
                 conn.execute(
-                    "UPDATE games SET status = ?1, deleted_at = ?2 WHERE id = ?3",
+                    "UPDATE games SET status = ?1, deleted_at = ?2, scanner_locked = 0 WHERE id = ?3",
                     rusqlite::params![status, now, id],
+                )?;
+            } else if status == "installed" {
+                // Restoring a game — lock it so the scanner won't auto-delete it again
+                conn.execute(
+                    "UPDATE games SET status = ?1, deleted_at = NULL, scanner_locked = 1 WHERE id = ?2",
+                    rusqlite::params![status, id],
                 )?;
             } else {
                 conn.execute(

@@ -4,9 +4,10 @@ import { useNavigate } from "react-router-dom";
 import {
   Search, Plus, Play, Star, ImageIcon, X, FolderOpen,
   ChevronLeft, ChevronRight, SlidersHorizontal, Info,
+  EyeOff, Trash2, RotateCcw, ExternalLink, FolderPlus,
 } from "lucide-react";
 import { open as openFileDialog } from "@tauri-apps/plugin-dialog";
-import { getGames, addManualGame, launchGame, GameFilter, Game } from "../api/client";
+import { getGames, addManualGame, launchGame, updateGame, setFavorite, deleteGame, GameFilter, Game, getCollections, addGameToCollection, removeGameFromCollection, getGameCollections, Collection } from "../api/client";
 import { useUiStore } from "../store/uiStore";
 import { formatHours, formatRelative, sourceLabel, sourceColor } from "../utils/format";
 import { gradientFromName } from "../utils/gameColor";
@@ -27,6 +28,7 @@ export default function Library() {
   const selectedIndex = useUiStore((s) => s.selectedLibraryIndex);
   const setSelectedIndex = useUiStore((s) => s.setSelectedLibraryIndex);
   const [filter, setFilter] = useState<GameFilter>({ status: "installed", sortBy: "name" });
+  const [filterKey, setFilterKey] = useState(0);
   const [showSearch, setShowSearch] = useState(false);
   const [showFilters, setShowFilters] = useState(false);
   const [showAddModal, setShowAddModal] = useState(false);
@@ -34,6 +36,7 @@ export default function Library() {
   const [newGame, setNewGame] = useState({ name: "", exePath: "" });
   const [launching, setLaunching] = useState(false);
   const [heroBgFailed, setHeroBgFailed] = useState(false);
+  const [contextMenu, setContextMenu] = useState<{ game: Game; x: number; y: number } | null>(null);
   const carouselRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const searchRef = useRef<HTMLInputElement>(null);
@@ -52,6 +55,53 @@ export default function Library() {
       toast.success("Game added");
     },
     onError: () => toast.error("Failed to add game"),
+  });
+
+  const favMutation = useMutation({
+    mutationFn: ({ id, fav }: { id: string; fav: boolean }) => setFavorite(id, fav),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["games"] }),
+    onError: () => toast.error("Failed to update favorite"),
+  });
+
+  const statusMutation = useMutation({
+    mutationFn: ({ id, status }: { id: string; status: string }) => updateGame(id, { status }),
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["games"] }); setFilterKey((k) => k + 1); },
+    onError: () => toast.error("Failed to update game"),
+  });
+
+  const removeMutation = useMutation({
+    mutationFn: (id: string) => deleteGame(id),
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["games"] }); setFilterKey((k) => k + 1); },
+    onError: () => toast.error("Failed to remove game"),
+  });
+
+  const { data: collections = [] } = useQuery({
+    queryKey: ["collections"],
+    queryFn: getCollections,
+  });
+
+  const addToCollectionMutation = useMutation({
+    mutationFn: ({ collectionId, gameId }: { collectionId: string; gameId: string }) =>
+      addGameToCollection(collectionId, gameId),
+    onSuccess: (_, { collectionId }) => {
+      queryClient.invalidateQueries({ queryKey: ["collection-games", collectionId] });
+      queryClient.invalidateQueries({ queryKey: ["game-collections"] });
+      const col = collections.find((c) => c.id === collectionId);
+      toast.success(`Added to ${col?.name ?? "collection"}`);
+    },
+    onError: () => toast.error("Failed to add to collection"),
+  });
+
+  const removeFromCollectionMutation = useMutation({
+    mutationFn: ({ collectionId, gameId }: { collectionId: string; gameId: string }) =>
+      removeGameFromCollection(collectionId, gameId),
+    onSuccess: (_, { collectionId }) => {
+      queryClient.invalidateQueries({ queryKey: ["collection-games", collectionId] });
+      queryClient.invalidateQueries({ queryKey: ["game-collections"] });
+      const col = collections.find((c) => c.id === collectionId);
+      toast.success(`Removed from ${col?.name ?? "collection"}`);
+    },
+    onError: () => toast.error("Failed to remove from collection"),
   });
 
   const selectedGame = games[selectedIndex] ?? null;
@@ -78,10 +128,22 @@ export default function Library() {
     el.scrollTo({ left: Math.max(0, targetScroll), behavior: "smooth" });
   }, [selectedIndex]);
 
+  // Dismiss context menu on click-outside or Escape
+  useEffect(() => {
+    if (!contextMenu) return;
+    function dismiss(e: MouseEvent | KeyboardEvent) {
+      if (e instanceof KeyboardEvent && e.key !== "Escape") return;
+      setContextMenu(null);
+    }
+    window.addEventListener("mousedown", dismiss);
+    window.addEventListener("keydown", dismiss);
+    return () => { window.removeEventListener("mousedown", dismiss); window.removeEventListener("keydown", dismiss); };
+  }, [contextMenu]);
+
   // Keyboard navigation
   useEffect(() => {
     function handleKey(e: KeyboardEvent) {
-      if (showAddModal || showSearch || showFilters) return;
+      if (showAddModal || showSearch || showFilters || contextMenu) return;
       if (e.key === "ArrowLeft") {
         e.preventDefault();
         setSelectedIndex(Math.max(0, selectedIndex - 1));
@@ -189,7 +251,7 @@ export default function Library() {
         <div className="flex-shrink-0 pt-4">
 
           {/* Controls row */}
-          <div className="flex items-center gap-2 px-5 pb-3">
+          <div className="relative z-50 flex items-center gap-2 px-5 pb-3">
             <span className="text-[11px] font-bold text-white/50 uppercase tracking-[0.18em]">Library</span>
             {games.length > 0 && <span className="text-[11px] text-white/25">· {games.length}</span>}
 
@@ -218,28 +280,42 @@ export default function Library() {
 
             {showFilters && (
               <div className="flex items-center gap-2 animate-ps5-left">
-                <select
+                <FilterSelect
+                  value={filter.status ?? "installed"}
+                  onChange={(v) => { setFilter((f) => ({ ...f, status: v as GameFilter["status"] })); setFilterKey((k) => k + 1); }}
+                  options={[
+                    { value: "installed", label: "Installed" },
+                    { value: "hidden", label: "Hidden" },
+                    { value: "deleted", label: "Deleted" },
+                    { value: "all", label: "All" },
+                  ]}
+                />
+                <FilterSelect
                   value={filter.source ?? ""}
-                  onChange={(e) => setFilter((f) => ({ ...f, source: e.target.value || undefined }))}
-                  className="text-xs rounded-full px-3 py-1 text-white outline-none cursor-pointer appearance-none"
-                  style={{ background: "rgba(30,30,38,0.95)", border: "1px solid rgba(255,255,255,0.15)", colorScheme: "dark" }}
-                >
-                  <option value="">All Sources</option>
-                  {["steam", "epic", "gog", "xbox", "riot", "manual"].map((s) => (
-                    <option key={s} value={s}>{sourceLabel(s)}</option>
-                  ))}
-                </select>
-                <select
+                  onChange={(v) => { setFilter((f) => ({ ...f, source: v || undefined })); setFilterKey((k) => k + 1); }}
+                  options={[
+                    { value: "", label: "All Sources" },
+                    ...["steam", "epic", "gog", "xbox", "riot", "manual"].map((s) => ({ value: s, label: sourceLabel(s) })),
+                  ]}
+                />
+                <FilterSelect
+                  value={filter.collectionId ?? ""}
+                  onChange={(v) => { setFilter((f) => ({ ...f, collectionId: v || undefined })); setFilterKey((k) => k + 1); }}
+                  options={[
+                    { value: "", label: "All Collections" },
+                    ...collections.map((c) => ({ value: c.id, label: c.name })),
+                  ]}
+                />
+                <FilterSelect
                   value={filter.sortBy ?? "name"}
-                  onChange={(e) => setFilter((f) => ({ ...f, sortBy: e.target.value as GameFilter["sortBy"] }))}
-                  className="text-xs rounded-full px-3 py-1 text-white outline-none cursor-pointer appearance-none"
-                  style={{ background: "rgba(30,30,38,0.95)", border: "1px solid rgba(255,255,255,0.15)", colorScheme: "dark" }}
-                >
-                  <option value="name">Name</option>
-                  <option value="playtime">Playtime</option>
-                  <option value="last_played">Last Played</option>
-                  <option value="added">Date Added</option>
-                </select>
+                  onChange={(v) => { setFilter((f) => ({ ...f, sortBy: v as GameFilter["sortBy"] })); setFilterKey((k) => k + 1); }}
+                  options={[
+                    { value: "name", label: "Name" },
+                    { value: "playtime", label: "Playtime" },
+                    { value: "last_played", label: "Last Played" },
+                    { value: "added", label: "Date Added" },
+                  ]}
+                />
                 <button
                   onClick={() => setFilter((f) => ({ ...f, favoritesOnly: !f.favoritesOnly }))}
                   className={`p-1.5 rounded-full transition-colors cursor-pointer ${filter.favoritesOnly ? "text-yellow-300" : "text-white/40 hover:text-white/70"}`}
@@ -295,8 +371,9 @@ export default function Library() {
 
               {/* Cards track */}
               <div
+                key={filterKey}
                 ref={carouselRef}
-                className="flex gap-2.5 overflow-x-hidden px-10 py-4"
+                className="flex gap-2.5 overflow-hidden px-10 pt-4 pb-6 animate-ps5-fade"
                 style={{ scrollBehavior: "smooth" }}
               >
                 {games.map((game, i) => (
@@ -309,6 +386,7 @@ export default function Library() {
                       else setSelectedIndex(i);
                     }}
                     onCoverPick={(e) => { e.stopPropagation(); setCoverPickGame(game); }}
+                    onContextMenu={(e) => { e.preventDefault(); setSelectedIndex(i); setContextMenu({ game, x: e.clientX, y: e.clientY }); }}
                   />
                 ))}
               </div>
@@ -415,6 +493,25 @@ export default function Library() {
         <CoverPickerModal game={coverPickGame} onClose={() => setCoverPickGame(null)} />
       )}
 
+      {contextMenu && (
+        <GameContextMenu
+          game={contextMenu.game}
+          x={contextMenu.x}
+          y={contextMenu.y}
+          collections={collections}
+          onClose={() => setContextMenu(null)}
+          onPlay={() => { setContextMenu(null); handleLaunchSelected(); }}
+          onDetails={() => { setContextMenu(null); navigate(`/library/${contextMenu.game.id}`); }}
+          onCoverPick={() => { setContextMenu(null); setCoverPickGame(contextMenu.game); }}
+          onToggleFavorite={() => { favMutation.mutate({ id: contextMenu.game.id, fav: !contextMenu.game.isFavorite }); setContextMenu(null); }}
+          onHide={() => { statusMutation.mutate({ id: contextMenu.game.id, status: "hidden" }); setContextMenu(null); toast.success("Game hidden"); }}
+          onRestore={() => { statusMutation.mutate({ id: contextMenu.game.id, status: "installed" }); setContextMenu(null); toast.success("Game restored"); }}
+          onRemove={() => { removeMutation.mutate(contextMenu.game.id); setContextMenu(null); toast.success("Game removed"); }}
+          onAddToCollection={(collectionId) => { addToCollectionMutation.mutate({ collectionId, gameId: contextMenu.game.id }); setContextMenu(null); }}
+          onRemoveFromCollection={(collectionId) => { removeFromCollectionMutation.mutate({ collectionId, gameId: contextMenu.game.id }); setContextMenu(null); }}
+        />
+      )}
+
       {/* ── Add game modal ── */}
       {showAddModal && (
         <div
@@ -505,9 +602,10 @@ interface CardProps {
   isSelected: boolean;
   onClick: () => void;
   onCoverPick: (e: React.MouseEvent) => void;
+  onContextMenu: (e: React.MouseEvent) => void;
 }
 
-function CarouselCard({ game, isSelected, onClick, onCoverPick }: CardProps) {
+function CarouselCard({ game, isSelected, onClick, onCoverPick, onContextMenu }: CardProps) {
   const currentlyPlayingId = useUiStore((s) => s.currentlyPlayingGameId);
   const isPlaying = currentlyPlayingId === game.id;
   const hasCover = !!game.coverUrl;
@@ -515,6 +613,7 @@ function CarouselCard({ game, isSelected, onClick, onCoverPick }: CardProps) {
   return (
     <div
       onClick={onClick}
+      onContextMenu={onContextMenu}
       className="flex-shrink-0 relative cursor-pointer group"
       style={{ width: CARD_W, height: CARD_H }}
       tabIndex={0}
@@ -600,6 +699,199 @@ function CarouselCard({ game, isSelected, onClick, onCoverPick }: CardProps) {
         </p>
       )}
     </div>
+  );
+}
+
+function FilterSelect({
+  value,
+  onChange,
+  options,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  options: { value: string; label: string }[];
+}) {
+  const selected = options.find((o) => o.value === value) ?? options[0];
+  const [open, setOpen] = useState(false);
+
+  return (
+    <div className="relative" onBlur={() => setOpen(false)}>
+      <button
+        onClick={() => setOpen((v) => !v)}
+        className="flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs text-white/75 hover:text-white transition-colors cursor-pointer"
+        style={{ background: "rgba(255,255,255,0.08)", border: "1px solid rgba(255,255,255,0.12)" }}
+      >
+        {selected.label}
+        <svg width="9" height="9" viewBox="0 0 10 10" fill="none" className={`transition-transform ${open ? "rotate-180" : ""}`}>
+          <path d="M2 3.5L5 6.5L8 3.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+      </button>
+      {open && (
+        <div
+          className="absolute top-full mt-1 right-0 z-[200] rounded-xl py-1 min-w-[110px]"
+          style={{ background: "rgb(18,18,24)", border: "1px solid rgba(255,255,255,0.18)", boxShadow: "0 8px 32px rgba(0,0,0,0.8)" }}
+        >
+          {options.map((opt) => (
+            <button
+              key={opt.value}
+              onMouseDown={() => { onChange(opt.value); setOpen(false); }}
+              className={`w-full text-left px-3 py-1.5 text-xs transition-colors cursor-pointer ${opt.value === value ? "text-white font-medium" : "text-white/50 hover:text-white"}`}
+              style={opt.value === value ? { background: "rgba(255,255,255,0.08)" } : {}}
+            >
+              {opt.label}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function GameContextMenu({
+  game, x, y, onClose: _onClose, collections,
+  onPlay, onDetails, onCoverPick,
+  onToggleFavorite, onHide, onRestore, onRemove, onAddToCollection, onRemoveFromCollection,
+}: {
+  game: Game; x: number; y: number; onClose: () => void;
+  collections: Collection[];
+  onPlay: () => void; onDetails: () => void; onCoverPick: () => void;
+  onToggleFavorite: () => void; onHide: () => void; onRestore: () => void; onRemove: () => void;
+  onAddToCollection: (collectionId: string) => void;
+  onRemoveFromCollection: (collectionId: string) => void;
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+  const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [showCollections, setShowCollections] = useState(false);
+
+  const { data: gameCollections = [] } = useQuery({
+    queryKey: ["game-collections", game.id],
+    queryFn: () => getGameCollections(game.id),
+    enabled: showCollections,
+  });
+
+  function openCollections() {
+    if (closeTimer.current) clearTimeout(closeTimer.current);
+    setShowCollections(true);
+  }
+  function scheduleClose() {
+    closeTimer.current = setTimeout(() => setShowCollections(false), 120);
+  }
+
+  // Flip so menu stays inside viewport
+  const [pos, setPos] = useState({ left: x, top: y });
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const { width, height } = el.getBoundingClientRect();
+    setPos({
+      left: x + width > window.innerWidth ? x - width : x,
+      top: y + height > window.innerHeight ? y - height : y,
+    });
+  }, [x, y]);
+
+  const isInstalled = game.status === "installed";
+  const isHidden = game.status === "hidden";
+  const gameCollectionIds = new Set(gameCollections.map((c) => c.id));
+
+  return (
+    <div
+      ref={ref}
+      onMouseDown={(e) => e.stopPropagation()}
+      className="fixed z-[500] rounded-xl py-1 min-w-[170px] animate-ps5-fade"
+      style={{ left: pos.left, top: pos.top, background: "rgb(16,16,22)", border: "1px solid rgba(255,255,255,0.14)", boxShadow: "0 16px 48px rgba(0,0,0,0.85)" }}
+    >
+      <p className="px-3 pt-1.5 pb-2 text-[10px] font-semibold text-white/30 uppercase tracking-widest truncate">{game.name}</p>
+      <div className="border-t border-white/8 mb-1" />
+
+      {canLaunch(game) && (
+        <CtxItem icon={<Play size={13} className="fill-white" />} label="Play" onClick={onPlay} highlight />
+      )}
+      <CtxItem icon={<ExternalLink size={13} />} label="View Details" onClick={onDetails} />
+      <CtxItem icon={<ImageIcon size={13} />} label="Change Cover" onClick={onCoverPick} />
+
+      <div className="border-t border-white/8 my-1" />
+
+      <CtxItem
+        icon={<Star size={13} className={game.isFavorite ? "fill-yellow-400 text-yellow-400" : ""} />}
+        label={game.isFavorite ? "Unfavorite" : "Favorite"}
+        onClick={onToggleFavorite}
+      />
+
+      {/* Collections flyout — hover to open, delayed close bridges the gap */}
+      <div className="relative" onMouseEnter={openCollections} onMouseLeave={scheduleClose}>
+        <button
+          className={`w-full flex items-center gap-2.5 px-3 py-1.5 text-xs transition-colors cursor-pointer text-left
+            ${showCollections ? "text-white bg-white/8" : "text-white/65 hover:text-white hover:bg-white/6"}`}
+        >
+          <FolderPlus size={13} />
+          <span className="flex-1">Collections</span>
+          <ChevronRight size={11} className="text-white/30" />
+        </button>
+
+        {showCollections && (
+          <div
+            onMouseEnter={openCollections}
+            onMouseLeave={scheduleClose}
+            className="absolute left-full top-0 rounded-xl py-1 min-w-[170px] z-[600]"
+            style={{ background: "rgb(16,16,22)", border: "1px solid rgba(255,255,255,0.14)", boxShadow: "0 16px 48px rgba(0,0,0,0.85)" }}
+          >
+            {collections.length === 0 ? (
+              <p className="px-3 py-2 text-xs text-white/30 italic">No collections yet</p>
+            ) : (
+              <>
+                {gameCollections.length > 0 && (
+                  <button
+                    onClick={() => { gameCollections.forEach((c) => onRemoveFromCollection(c.id)); }}
+                    className="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-white/40 hover:text-white/70 hover:bg-white/6 transition-colors cursor-pointer text-left"
+                  >
+                    <span className="w-2 h-2 rounded-full flex-shrink-0 border border-white/20" />
+                    <span className="italic">None</span>
+                  </button>
+                )}
+                {gameCollections.length > 0 && <div className="border-t border-white/8 my-1" />}
+                {collections.map((col) => {
+                  const inCol = gameCollectionIds.has(col.id);
+                  return (
+                    <button
+                      key={col.id}
+                      onClick={() => inCol ? onRemoveFromCollection(col.id) : onAddToCollection(col.id)}
+                      className="w-full flex items-center gap-2 px-3 py-1.5 text-xs transition-colors cursor-pointer text-left hover:bg-white/6"
+                      style={{ color: inCol ? "rgba(255,255,255,0.85)" : "rgba(255,255,255,0.5)" }}
+                    >
+                      <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: col.color, opacity: inCol ? 1 : 0.5 }} />
+                      <span className="flex-1 truncate">{col.name}</span>
+                      {inCol && <span className="text-white/30 text-[10px]">✓</span>}
+                    </button>
+                  );
+                })}
+              </>
+            )}
+          </div>
+        )}
+      </div>
+
+      {isInstalled && <CtxItem icon={<EyeOff size={13} />} label="Hide" onClick={onHide} />}
+      {(isHidden || game.status === "deleted") && <CtxItem icon={<RotateCcw size={13} />} label="Restore" onClick={onRestore} />}
+
+      <div className="border-t border-white/8 my-1" />
+
+      <CtxItem icon={<Trash2 size={13} />} label="Remove" onClick={onRemove} danger />
+    </div>
+  );
+}
+
+function CtxItem({ icon, label, onClick, highlight, danger }: {
+  icon: React.ReactNode; label: string; onClick: () => void; highlight?: boolean; danger?: boolean;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      className={`w-full flex items-center gap-2.5 px-3 py-1.5 text-xs transition-colors cursor-pointer text-left
+        ${danger ? "text-red-400 hover:bg-red-500/10" : highlight ? "text-white font-medium hover:bg-white/10" : "text-white/65 hover:text-white hover:bg-white/6"}`}
+    >
+      {icon}
+      {label}
+    </button>
   );
 }
 

@@ -150,6 +150,7 @@ pub struct GameFilter {
     pub favorites_only: Option<bool>,
     pub sort_by: Option<String>, // "name" | "playtime" | "last_played" | "added"
     pub sort_dir: Option<String>, // "asc" | "desc"
+    pub collection_id: Option<String>,
 }
 
 /// Internal struct used by scanners to report discovered games

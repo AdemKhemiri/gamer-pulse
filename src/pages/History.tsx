@@ -1,8 +1,8 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
-import { Trash2, CheckSquare, Square, X } from "lucide-react";
-import { getGames, permanentlyDeleteGame } from "../api/client";
+import { Trash2, CheckSquare, Square, X, RotateCcw } from "lucide-react";
+import { getGames, permanentlyDeleteGame, updateGame } from "../api/client";
 import { formatHours, formatDate, sourceLabel } from "../utils/format";
 import { gradientFromName } from "../utils/gameColor";
 import toast from "react-hot-toast";
@@ -35,10 +35,36 @@ export default function History() {
     onError: () => toast.error("Failed to delete games"),
   });
 
+  const restoreMutation = useMutation({
+    mutationFn: (id: string) => updateGame(id, { status: "installed" }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["games"] });
+      toast.success("Game restored to library");
+    },
+    onError: () => toast.error("Failed to restore game"),
+  });
+
+  const bulkRestoreMutation = useMutation({
+    mutationFn: async (ids: string[]) => {
+      await Promise.all(ids.map((id) => updateGame(id, { status: "installed" })));
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["games"] });
+      setSelected(new Set()); setSelecting(false);
+      toast.success("Games restored to library");
+    },
+    onError: () => toast.error("Failed to restore games"),
+  });
+
   function toggleSelect(id: string) {
     setSelected((prev) => { const next = new Set(prev); next.has(id) ? next.delete(id) : next.add(id); return next; });
   }
   function exitSelect() { setSelecting(false); setSelected(new Set()); setConfirmBulkDelete(false); }
+  function handleRestoreClick(e: React.MouseEvent, id: string) {
+    e.stopPropagation();
+    setConfirmId(null);
+    restoreMutation.mutate(id);
+  }
   function handleDeleteClick(e: React.MouseEvent, id: string) {
     e.stopPropagation();
     if (confirmId === id) deleteMutation.mutate(id);
@@ -143,6 +169,15 @@ export default function History() {
                 </div>
 
                 {!selecting && (
+                  <>
+                  <button
+                    onClick={(e) => handleRestoreClick(e, game.id)}
+                    disabled={restoreMutation.isPending}
+                    className="flex-shrink-0 flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-xs font-medium cursor-pointer transition-all text-white/35 hover:text-green-400 hover:bg-green-500/10"
+                  >
+                    <RotateCcw size={13} />
+                    Restore
+                  </button>
                   <button
                     onClick={(e) => handleDeleteClick(e, game.id)}
                     disabled={deleteMutation.isPending}
@@ -155,6 +190,7 @@ export default function History() {
                     <Trash2 size={13} />
                     {confirmId === game.id ? "Confirm?" : "Delete"}
                   </button>
+                  </>
                 )}
               </div>
             );
@@ -184,11 +220,18 @@ export default function History() {
                 </button>
               </>
             ) : (
-              <button onClick={() => setConfirmBulkDelete(true)}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-red-400 text-sm cursor-pointer hover:bg-red-500/10 transition-colors">
-                <Trash2 size={13} />
-                Delete permanently
-              </button>
+              <>
+                <button onClick={() => bulkRestoreMutation.mutate([...selected])} disabled={bulkRestoreMutation.isPending}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-green-400 text-sm cursor-pointer hover:bg-green-500/10 transition-colors disabled:opacity-50">
+                  <RotateCcw size={13} />
+                  Restore
+                </button>
+                <button onClick={() => setConfirmBulkDelete(true)}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-red-400 text-sm cursor-pointer hover:bg-red-500/10 transition-colors">
+                  <Trash2 size={13} />
+                  Delete permanently
+                </button>
+              </>
             )}
           </div>
         )}

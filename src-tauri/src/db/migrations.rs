@@ -93,5 +93,9 @@ pub fn get_migrations() -> Migrations<'static> {
     M::up(
         // Migration 5 – background/hero image URL per game
         "ALTER TABLE games ADD COLUMN bg_url TEXT;",
+    ),
+    M::up(
+        // Migration 6 – scanner lock flag: prevents auto-deletion for user-restored games
+        "ALTER TABLE games ADD COLUMN scanner_locked INTEGER NOT NULL DEFAULT 0;",
     )])
 }

@@ -127,6 +127,7 @@ pub fn run() {
             commands::settings::open_db_folder,
             commands::settings::get_autostart,
             commands::settings::set_autostart,
+            commands::settings::is_hidden_launch,
             // Goals
             commands::goals::get_goals,
             commands::goals::set_goal,

@@ -1,31 +1,76 @@
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
-import { Clock, Gamepad2, Calendar, Star, Flame, Trophy } from "lucide-react";
+import { Clock, Gamepad2, Calendar, Star, Flame, Trophy, Play } from "lucide-react";
 import { getGlobalStats, getRecentSessions, getAchievements, getTopGames, getGameStreaks, getGames } from "../api/client";
+import type { Session } from "../api/client";
 import { formatHours, formatDuration, formatDate } from "../utils/format";
 import { gradientFromName, accentFromName } from "../utils/gameColor";
 import AchievementBadge from "../components/stats/AchievementBadge";
+import { useUiStore } from "../store/uiStore";
+
+function dayKey(isoStr: string): string {
+  const d = new Date(isoStr);
+  return `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
+}
+
+function dayLabel(isoStr: string): string {
+  const date = new Date(isoStr);
+  const todayStart = new Date(); todayStart.setHours(0, 0, 0, 0);
+  const dateStart = new Date(date); dateStart.setHours(0, 0, 0, 0);
+  const diff = Math.round((todayStart.getTime() - dateStart.getTime()) / 86400000);
+  if (diff === 0) return "Today";
+  if (diff === 1) return "Yesterday";
+  return date.toLocaleDateString("en-US", { weekday: "long", month: "short", day: "numeric" });
+}
+
+function relativeTime(isoStr: string): string {
+  const diff = Date.now() - new Date(isoStr).getTime();
+  const mins = Math.floor(diff / 60000);
+  if (mins < 1) return "just now";
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.floor(diff / 3600000);
+  if (hrs < 24) return `${hrs}h ago`;
+  const days = Math.floor(diff / 86400000);
+  if (days < 7) return `${days}d ago`;
+  return formatDate(isoStr);
+}
 
 export default function Dashboard() {
   const navigate = useNavigate();
+  const showContinuePlaying = useUiStore((s) => s.showContinuePlaying);
 
   const { data: stats } = useQuery({ queryKey: ["globalStats"], queryFn: getGlobalStats });
-  const { data: recentSessions } = useQuery({ queryKey: ["sessions", "recent"], queryFn: () => getRecentSessions(8) });
+  const { data: recentSessions } = useQuery({ queryKey: ["sessions", "recent"], queryFn: () => getRecentSessions(12) });
   const { data: achievements } = useQuery({ queryKey: ["achievements"], queryFn: () => getAchievements() });
   const { data: topGames } = useQuery({ queryKey: ["topGames"], queryFn: () => getTopGames(5) });
   const { data: gameStreaks } = useQuery({ queryKey: ["gameStreaks"], queryFn: () => getGameStreaks(5) });
   const { data: allGames } = useQuery({ queryKey: ["games", { status: "installed" }], queryFn: () => getGames({ status: "installed" }) });
+  const { data: allGamesForCovers } = useQuery({ queryKey: ["games", "allCovers"], queryFn: () => getGames() });
 
-  // Build a quick gameId → coverUrl lookup from the games list
   const coverMap = new Map<string, string | undefined>(
-    (allGames ?? []).map((g) => [g.id, g.coverUrl])
+    (allGamesForCovers ?? []).map((g) => [g.id, g.coverUrl])
   );
 
   const maxPlaySecs = topGames?.[0]?.totalSecs ?? 1;
+  const maxSessionSecs = Math.max(...(recentSessions?.map((s) => s.durationSecs ?? 0) ?? [1]), 1);
+
+  // Group sessions by day
+  const sessionsByDay = (recentSessions ?? []).reduce<Record<string, Session[]>>((acc, s) => {
+    const key = dayKey(s.startedAt);
+    if (!acc[key]) acc[key] = [];
+    acc[key].push(s);
+    return acc;
+  }, {});
+  const dayKeys = Object.keys(sessionsByDay);
+
+  // Continue Playing: games with lastPlayedAt, most recent first
+  const continuePlaying = [...(allGames ?? [])]
+    .filter((g) => g.lastPlayedAt)
+    .sort((a, b) => new Date(b.lastPlayedAt!).getTime() - new Date(a.lastPlayedAt!).getTime())
+    .slice(0, 6);
 
   return (
     <div className="h-full overflow-auto">
-      {/* Background */}
       <div className="fixed inset-0 z-0" style={{ background: "radial-gradient(ellipse at 60% 0%, rgba(80,40,120,0.18) 0%, transparent 60%), radial-gradient(ellipse at 0% 80%, rgba(30,60,120,0.12) 0%, transparent 60%), #050505" }} />
 
       <div className="relative z-10 max-w-6xl mx-auto px-6 py-8 space-y-6">
@@ -36,6 +81,49 @@ export default function Dashboard() {
           <h1 className="text-3xl font-bold text-white">Dashboard</h1>
           <p className="text-sm text-white/40 mt-1">Your gaming activity at a glance</p>
         </div>
+
+        {/* ── Continue Playing ── */}
+        {showContinuePlaying && continuePlaying.length > 0 && (
+          <div className="animate-ps5-fade">
+            <p className="text-xs text-white/40 uppercase tracking-[0.12em] font-semibold mb-3">Continue Playing</p>
+            <div className="flex gap-3 overflow-x-auto pb-1" style={{ scrollbarWidth: "none" }}>
+              {continuePlaying.map((game) => (
+                <div
+                  key={game.id}
+                  onClick={() => navigate(`/library/${game.id}`)}
+                  className="relative flex-shrink-0 w-36 h-24 rounded-2xl overflow-hidden cursor-pointer group"
+                  style={{ border: "1px solid rgba(255,255,255,0.08)" }}
+                >
+                  {game.coverUrl ? (
+                    <img
+                      src={game.coverUrl}
+                      alt={game.name}
+                      className="absolute inset-0 w-full h-full object-cover transition-transform duration-300 group-hover:scale-105"
+                    />
+                  ) : (
+                    <div className="absolute inset-0" style={{ background: gradientFromName(game.name) }} />
+                  )}
+                  <div
+                    className="absolute inset-0"
+                    style={{ background: "linear-gradient(to top, rgba(0,0,0,0.88) 0%, rgba(0,0,0,0.25) 55%, transparent 100%)" }}
+                  />
+                  <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity duration-200">
+                    <div
+                      className="w-8 h-8 rounded-full flex items-center justify-center"
+                      style={{ background: "rgba(255,255,255,0.18)", backdropFilter: "blur(6px)" }}
+                    >
+                      <Play size={11} className="text-white ml-0.5" fill="white" />
+                    </div>
+                  </div>
+                  <div className="absolute bottom-0 left-0 right-0 p-2.5">
+                    <p className="text-xs font-semibold text-white truncate leading-tight">{game.name}</p>
+                    <p className="text-[10px] text-white/45 mt-0.5">{relativeTime(game.lastPlayedAt!)}</p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
 
         {/* ── Stat cards ── */}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
@@ -71,48 +159,70 @@ export default function Dashboard() {
 
         {/* ── Middle row ── */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-          {/* Recent sessions */}
+
+          {/* Activity Timeline */}
           <div
             className="rounded-2xl p-5"
             style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.07)" }}
           >
-            <h2 className="text-xs text-white/40 uppercase tracking-[0.12em] font-semibold mb-4">Recent Sessions</h2>
+            <h2 className="text-xs text-white/40 uppercase tracking-[0.12em] font-semibold mb-4">Activity</h2>
             {!recentSessions?.length ? (
               <p className="text-sm text-white/25">No sessions yet. Play a game!</p>
             ) : (
-              <div className="space-y-1">
-                {recentSessions.map((s) => (
-                  <div
-                    key={s.id}
-                    onClick={() => navigate(`/library/${s.gameId}`)}
-                    className="flex items-center gap-3 px-3 py-2.5 rounded-xl hover:bg-white/6 cursor-pointer transition-colors group"
-                  >
-                    <div
-                      className="w-8 h-10 rounded-lg flex-shrink-0 overflow-hidden"
-                      style={{ background: gradientFromName(s.gameName ?? "") }}
-                    >
-                      {coverMap.get(s.gameId) ? (
-                        <img src={coverMap.get(s.gameId)} alt="" className="w-full h-full object-cover" />
-                      ) : (
-                        <div className="w-full h-full flex items-center justify-center text-xs font-bold text-white/60">
-                          {(s.gameName ?? "?").charAt(0)}
-                        </div>
-                      )}
+              <div className="space-y-4 max-h-72 overflow-y-auto pr-1" style={{ scrollbarWidth: "thin", scrollbarColor: "rgba(255,255,255,0.1) transparent" }}>
+                {dayKeys.map((key) => (
+                  <div key={key}>
+                    <div className="flex items-center gap-2 mb-1.5">
+                      <span className="text-[10px] text-white/30 font-medium uppercase tracking-wider whitespace-nowrap">
+                        {dayLabel(sessionsByDay[key][0].startedAt)}
+                      </span>
+                      <div className="flex-1 h-px" style={{ background: "rgba(255,255,255,0.06)" }} />
                     </div>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm text-white font-medium truncate">{s.gameName}</p>
-                      <p className="text-xs text-white/35">{formatDate(s.startedAt)}</p>
+                    <div className="space-y-0.5">
+                      {sessionsByDay[key].map((s) => {
+                        const barPct = Math.round(((s.durationSecs ?? 0) / maxSessionSecs) * 100);
+                        const accent = accentFromName(s.gameName ?? "");
+                        return (
+                          <div
+                            key={s.id}
+                            onClick={() => navigate(`/library/${s.gameId}`)}
+                            className="relative flex items-center gap-3 px-3 py-2 rounded-xl cursor-pointer transition-colors group overflow-hidden hover:bg-white/4"
+                          >
+                            <div
+                              className="absolute inset-0 rounded-xl"
+                              style={{ width: `${barPct}%`, background: `${accent}10`, pointerEvents: "none" }}
+                            />
+                            <div className="w-0.5 h-6 rounded-full flex-shrink-0 relative" style={{ background: accent }} />
+                            <div className="w-7 h-9 rounded-md flex-shrink-0 overflow-hidden relative">
+                              {coverMap.get(s.gameId) ? (
+                                <img src={coverMap.get(s.gameId)} alt="" className="w-full h-full object-cover" />
+                              ) : (
+                                <div
+                                  className="w-full h-full flex items-center justify-center text-[10px] font-bold text-white/50"
+                                  style={{ background: gradientFromName(s.gameName ?? "") }}
+                                >
+                                  {(s.gameName ?? "?").charAt(0)}
+                                </div>
+                              )}
+                            </div>
+                            <div className="flex-1 min-w-0 relative">
+                              <p className="text-sm text-white font-medium truncate">{s.gameName}</p>
+                              <p className="text-[10px] text-white/30">{relativeTime(s.startedAt)}</p>
+                            </div>
+                            <span className="text-xs text-white/40 flex-shrink-0 font-medium relative tabular-nums">
+                              {s.durationSecs ? formatDuration(s.durationSecs) : "—"}
+                            </span>
+                          </div>
+                        );
+                      })}
                     </div>
-                    <span className="text-xs text-white/50 flex-shrink-0">
-                      {s.durationSecs ? formatDuration(s.durationSecs) : "—"}
-                    </span>
                   </div>
                 ))}
               </div>
             )}
           </div>
 
-          {/* Most played */}
+          {/* Most Played */}
           <div
             className="rounded-2xl p-5"
             style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.07)" }}
@@ -133,30 +243,24 @@ export default function Dashboard() {
                       {g.coverUrl ? (
                         <img src={g.coverUrl} alt={g.gameName} className="w-full h-full object-cover" />
                       ) : (
-                        <div className="w-full h-full flex items-center justify-center text-xs font-bold text-white/50"
-                          style={{ background: gradientFromName(g.gameName) }}>
+                        <div
+                          className="w-full h-full flex items-center justify-center text-xs font-bold text-white/50"
+                          style={{ background: gradientFromName(g.gameName) }}
+                        >
                           {g.gameName.charAt(0)}
                         </div>
                       )}
                     </div>
                     <div className="flex-1 min-w-0">
                       <p className="text-sm text-white truncate group-hover:text-white/80 transition-colors">{g.gameName}</p>
-                      <div
-                        className="mt-1 h-1 rounded-full overflow-hidden"
-                        style={{ background: "rgba(255,255,255,0.08)" }}
-                      >
+                      <div className="mt-1 h-1 rounded-full overflow-hidden" style={{ background: "rgba(255,255,255,0.08)" }}>
                         <div
                           className="h-full rounded-full transition-all"
-                          style={{
-                            width: `${Math.round((g.totalSecs / maxPlaySecs) * 100)}%`,
-                            background: accentFromName(g.gameName),
-                          }}
+                          style={{ width: `${Math.round((g.totalSecs / maxPlaySecs) * 100)}%`, background: accentFromName(g.gameName) }}
                         />
                       </div>
                     </div>
-                    <span className="text-xs text-white/50 flex-shrink-0 w-10 text-right">
-                      {formatHours(g.totalSecs)}
-                    </span>
+                    <span className="text-xs text-white/50 flex-shrink-0 w-10 text-right">{formatHours(g.totalSecs)}</span>
                   </div>
                 ))}
               </div>

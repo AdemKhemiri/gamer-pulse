@@ -104,7 +104,7 @@ pub async fn trigger_scan(state: State<'_, AppState>) -> Result<ScanResult> {
                 "UPDATE games SET name = ?1, install_path = ?2, exe_path = ?3,
                           cover_url = COALESCE(?4, cover_url),
                           status = CASE WHEN status = 'hidden' THEN 'hidden' ELSE 'installed' END,
-                          deleted_at = NULL, last_scanned_at = ?5
+                          deleted_at = NULL, scanner_locked = 0, last_scanned_at = ?5
                  WHERE id = ?6",
                 rusqlite::params![
                     game.name,
@@ -154,7 +154,7 @@ pub async fn trigger_scan(state: State<'_, AppState>) -> Result<ScanResult> {
 
         let mut stmt = conn.prepare(
             "SELECT id, source, source_id FROM games
-             WHERE status = 'installed' AND source != 'manual'",
+             WHERE status = 'installed' AND source != 'manual' AND scanner_locked = 0",
         )?;
 
         let existing: Vec<(String, String, String)> = stmt

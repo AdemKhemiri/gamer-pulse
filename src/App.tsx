@@ -15,7 +15,7 @@ import SpinToPick from "./pages/SpinToPick";
 import Collections from "./pages/Collections";
 import CollectionDetail from "./pages/CollectionDetail";
 import { useGameEvents } from "./hooks/useGameEvents";
-import { triggerScan, getSettings } from "./api/client";
+import { triggerScan, getSettings, isHiddenLaunch } from "./api/client";
 import { useUiStore } from "./store/uiStore";
 import { check } from "@tauri-apps/plugin-updater";
 
@@ -68,6 +68,12 @@ export default function App() {
   const { splashVisible, setSplashVisible } = useUiStore();
 
   useEffect(() => {
+    const block = (e: MouseEvent) => e.preventDefault();
+    window.addEventListener("contextmenu", block);
+    return () => window.removeEventListener("contextmenu", block);
+  }, []);
+
+  useEffect(() => {
     if (!splashVisible) return;
     const t = setTimeout(() => setSplashVisible(false), 2000);
     return () => clearTimeout(t);
@@ -85,9 +91,12 @@ export default function App() {
     }
     (async () => {
       setReady(true);
-      const win = getCurrentWindow();
-      await win.show();
-      await win.setFocus();
+      const hidden = await isHiddenLaunch();
+      if (!hidden) {
+        const win = getCurrentWindow();
+        await win.show();
+        await win.setFocus();
+      }
       check().catch(console.error);
     })();
   }, [isSuccess, settings?.scanOnLaunch]);

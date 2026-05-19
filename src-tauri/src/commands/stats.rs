@@ -306,7 +306,7 @@ pub async fn get_game_streaks(
         r#"SELECT DISTINCT g.id, g.name, g.cover_url
            FROM games g
            JOIN sessions s ON s.game_id = g.id
-           WHERE s.ended_at IS NOT NULL AND g.status = 'installed'"#,
+           WHERE s.ended_at IS NOT NULL AND g.status != 'hidden'"#,
     )?;
 
     let games: Vec<(String, String, Option<String>)> = stmt

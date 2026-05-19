@@ -110,6 +110,7 @@ export interface GameFilter {
   favoritesOnly?: boolean;
   sortBy?: "name" | "playtime" | "last_played" | "added";
   sortDir?: "asc" | "desc";
+  collectionId?: string;
 }
 
 export interface UserSettings {
@@ -250,6 +251,9 @@ export const getAutostart = (): Promise<boolean> =>
 
 export const setAutostart = (enabled: boolean): Promise<void> =>
   invoke("set_autostart", { enabled });
+
+export const isHiddenLaunch = (): Promise<boolean> =>
+  invoke("is_hidden_launch");
 
 export const searchHeroes = (gameName: string, apiKey: string): Promise<string[]> =>
   invoke("search_heroes", { gameName, apiKey });

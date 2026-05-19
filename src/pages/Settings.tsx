@@ -8,41 +8,10 @@ import { useUiStore } from "../store/uiStore";
 import { open as openDirDialog } from "@tauri-apps/plugin-dialog";
 
 
-const PRESETS: Record<string, { label: string; bg: string; accent: string; surface: string; colors: Record<string, string> }> = {
-  catppuccin: {
-    label: "Catppuccin", bg: "#1e1e2e", accent: "#cba6f7", surface: "#313244",
-    colors: {
-      "--gt-base": "#1e1e2e", "--gt-surface": "#181825", "--gt-overlay": "#313244",
-      "--gt-hover": "#45475a", "--gt-muted": "#6c7086", "--gt-sub": "#a6adc8",
-      "--gt-text": "#cdd6f4", "--gt-accent": "#cba6f7", "--gt-accent-dim": "#b48df7",
-      "--gt-blue": "#89b4fa", "--gt-green": "#a6e3a1", "--gt-red": "#f38ba8",
-      "--gt-yellow": "#f9e2af",
-    },
-  },
-  dracula: {
-    label: "Dracula", bg: "#282a36", accent: "#ff79c6", surface: "#44475a",
-    colors: {
-      "--gt-base": "#282a36", "--gt-surface": "#21222c", "--gt-overlay": "#44475a",
-      "--gt-hover": "#565970", "--gt-muted": "#6272a4", "--gt-sub": "#8b9ec3",
-      "--gt-text": "#f8f8f2", "--gt-accent": "#ff79c6", "--gt-accent-dim": "#ff55b0",
-      "--gt-blue": "#8be9fd", "--gt-green": "#50fa7b", "--gt-red": "#ff5555",
-      "--gt-yellow": "#f1fa8c",
-    },
-  },
-  nord: {
-    label: "Nord", bg: "#2e3440", accent: "#88c0d0", surface: "#3b4252",
-    colors: {
-      "--gt-base": "#2e3440", "--gt-surface": "#292f3b", "--gt-overlay": "#3b4252",
-      "--gt-hover": "#434c5e", "--gt-muted": "#616e88", "--gt-sub": "#8892a4",
-      "--gt-text": "#eceff4", "--gt-accent": "#88c0d0", "--gt-accent-dim": "#69b3c4",
-      "--gt-blue": "#81a1c1", "--gt-green": "#a3be8c", "--gt-red": "#bf616a",
-      "--gt-yellow": "#ebcb8b",
-    },
-  },
-};
-
 export default function Settings() {
   const setSplashVisible = useUiStore((s) => s.setSplashVisible);
+  const showContinuePlaying = useUiStore((s) => s.showContinuePlaying);
+  const setShowContinuePlaying = useUiStore((s) => s.setShowContinuePlaying);
   const queryClient = useQueryClient();
   const [confirmReset, setConfirmReset] = useState(false);
   const [checkingUpdate, setCheckingUpdate] = useState(false);
@@ -99,7 +68,7 @@ export default function Settings() {
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = `game-tracker-export-${new Date().toISOString().slice(0, 10)}.json`;
+      a.download = `gamer-pulse-export-${new Date().toISOString().slice(0, 10)}.json`;
       a.click();
       URL.revokeObjectURL(url);
       toast.success("Exported successfully");
@@ -328,8 +297,8 @@ export default function Settings() {
       </Section>
 
       {/* Theme */}
-      <Section title="Theme">
-        {/* Preset cards */}
+      {/* <Section title="Theme">
+        
         <div className="grid grid-cols-4 gap-2">
           {(Object.entries(PRESETS) as [string, typeof PRESETS[string]][]).map(([key, p]) => {
             const active = form.theme === key;
@@ -356,9 +325,16 @@ export default function Settings() {
           })}
         </div>
 
-        {/* TODO: custom theme color pickers + saved themes — commented out for now
-        ...
-        */}
+      </Section> */}
+
+      {/* Dashboard */}
+      <Section title="Dashboard">
+        <Toggle
+          label="Show Continue Playing"
+          description="Display recently played games at the top of the dashboard"
+          checked={showContinuePlaying}
+          onChange={setShowContinuePlaying}
+        />
       </Section>
 
       {/* Save */}
