@@ -2,6 +2,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState, useEffect } from "react";
 import { Download, Trash2, MonitorPlay, FolderPlus, X, FolderOpen, RefreshCw } from "lucide-react";
 import { check } from "@tauri-apps/plugin-updater";
+import { getVersion } from "@tauri-apps/api/app";
 import toast from "react-hot-toast";
 import { getSettings, updateSettings, exportData, resetDatabase, openDbFolder, getAutostart, setAutostart, UserSettings } from "../api/client";
 import { useUiStore } from "../store/uiStore";
@@ -16,6 +17,9 @@ export default function Settings() {
   const [confirmReset, setConfirmReset] = useState(false);
   const [checkingUpdate, setCheckingUpdate] = useState(false);
   const [downloadProgress, setDownloadProgress] = useState<number | null>(null);
+  const [appVersion, setAppVersion] = useState<string>("");
+
+  useEffect(() => { getVersion().then(setAppVersion); }, []);
 
   const { data: settings, isLoading } = useQuery({
     queryKey: ["settings"],
@@ -222,7 +226,7 @@ export default function Settings() {
               <p className="text-xs text-white/40 mt-1">{downloadProgress < 100 ? `Downloading… ${downloadProgress}%` : "Installing…"}</p>
             </div>
           )}
-          <p className="text-xs text-white/40 mt-1">Current version: v0.2.0</p>
+          <p className="text-xs text-white/40 mt-1">Current version: {appVersion ? `v${appVersion}` : "—"}</p>
         </div>
 
         <div className="border-t border-white/10 pt-3 mt-1">

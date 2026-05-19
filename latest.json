@@ -5,7 +5,7 @@
   "platforms": {
     "windows-x86_64": {
       "url": "https://github.com/AdemKhemiri/gamer-pulse/releases/download/v0.2.1/Gamer.Pulse_0.2.1_x64-setup.exe",
-      "signature": ""
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVTNGR2SUNCY1N0ZTcxR1BaVGdXdzBrTnA4QVJwTVJwdFJhWkNtWUhYUExYa3RmOVZTUXBxOU83SUZaMW1qUmVxWmhuc0xZQS9ZSjRnRXFYT3VwRktheTFuNWVmUlcwZFFVPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzc5MTgzMDM4CWZpbGU6R2FtZXIgUHVsc2VfMC4yLjFfeDY0LXNldHVwLmV4ZQpHbktUUEVOWGcwYkJ3am1Yei9GYjlpa0FiSXMvTHdkWnpqWnIrWmFtRlYxRklneXhDZzBKSC91ZTNENXJNeDBJd0JKSDc3ekc0dmxMM2tVUUpTOW5Cdz09Cg=="
     }
   }
 }
